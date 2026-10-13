@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+.env
+.env.local
+storage/*
+!storage/.gitkeep
+storage-e2e/
+logs/
+*.log
+coverage/
+playwright-report/
+test-results/
+apps/kiosk/out/
+.DS_Store

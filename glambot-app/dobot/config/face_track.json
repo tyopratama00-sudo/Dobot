@@ -1,0 +1,34 @@
+{
+  "_comment": "Kalibrasi face tracking per preset. Diisi OTOMATIS oleh tracker: sekali per preset ia memutar j5/j6 sebesar FACE_TRACK_PROBE_DEG, mengukur pergeseran wajah di frame, lalu menyimpan deg_per_err = berapa derajat sendi per satu satuan error (error 1.0 = selebar frame). Tandanya sekaligus menentukan arah koreksi. Hapus entri sebuah preset untuk memaksa kalibrasi ulang; hapus seluruh file untuk mengulang semuanya. pan_joint/tilt_joint hanya boleh 5 atau 6.",
+  "default": {
+    "pan_joint": 6,
+    "tilt_joint": 5
+  },
+  "1": {
+    "pan_deg_per_err": -284.13,
+    "tilt_deg_per_err": 6.0
+  },
+  "2": {
+    "pan_deg_per_err": -163.86,
+    "tilt_deg_per_err": 6.0
+  },
+  "4": {
+    "pan_deg_per_err": -177.6,
+    "tilt_deg_per_err": -166.3
+  },
+  "3": {
+    "pan_deg_per_err": -90.18,
+    "tilt_deg_per_err": -127.47
+  },
+  "5": {
+    "pan_deg_per_err": -207.33,
+    "tilt_deg_per_err": -107.29
+  },
+  "6": {
+    "pan_deg_per_err": -118.27,
+    "tilt_deg_per_err": 366.58
+  },
+  "10": {
+    "pan_deg_per_err": 14.45
+  }
+}

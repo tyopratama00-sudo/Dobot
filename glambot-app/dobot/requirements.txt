@@ -1,0 +1,10 @@
+# Core
+Flask>=3.0
+flask-cors>=4.0
+mediapipe>=0.10
+opencv-python>=4.8
+numpy>=1.23
+python-dotenv>=1.0
+
+# Optional — uncomment if you want them
+# pyrealsense2==2.53.1.4623 # Intel RealSense SR305 (hanya untuk kamera Intel RealSense)
