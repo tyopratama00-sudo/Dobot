@@ -217,7 +217,37 @@ img {
   margin-left: 4px;
 }
 
-/* Overlays (idle warning, reconnecting) */
+/* Page timer chip, top centre (screens keep their own chips left/right) */
+.timer {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  box-shadow: var(--sh);
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.timer.warn {
+  background: var(--er);
+  color: #fff;
+  animation: tmw 1s ease-in-out infinite;
+}
+@keyframes tmw {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Overlays (reconnecting) */
 .ovl {
   position: absolute;
   inset: 0;

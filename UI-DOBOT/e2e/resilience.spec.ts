@@ -51,18 +51,17 @@ test('payment failure → retry → success', async ({ page }) => {
   await expect(page.getByTestId('pay-ok')).toBeVisible();
 });
 
-test('inactivity on the payment screen warns, then cancels the unpaid session', async ({ page, request }) => {
+test('payment timer runs out (touches do not reset it), then cancels the unpaid session', async ({ page, request }) => {
   const a = await adminApi(request);
   await a.put('/api/admin/settings/timeouts', { value: { paymentSeconds: 30, warningSeconds: 20 } });
   try {
     await page.goto('/');
     await page.getByTestId('start').click();
     await screen(page, 'pay');
-    await expect(page.getByTestId('idle-warning')).toBeVisible({ timeout: 25_000 });
-    await page.mouse.click(960, 900); // any touch keeps the session alive
-    await expect(page.getByTestId('idle-warning')).toHaveCount(0);
-    await expect(page.getByTestId('idle-warning')).toBeVisible({ timeout: 25_000 });
-    await screen(page, 'welcome', 40_000);
+    await expect(page.getByTestId('timer')).toHaveClass(/warn/, { timeout: 25_000 });
+    await page.mouse.click(960, 900);
+    await expect(page.getByTestId('timer')).toHaveClass(/warn/);
+    await screen(page, 'welcome', 25_000);
   } finally {
     await a.del('/api/admin/settings/timeouts');
   }

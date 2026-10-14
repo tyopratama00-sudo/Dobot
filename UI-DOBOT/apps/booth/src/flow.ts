@@ -21,8 +21,8 @@ import {
 import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api/client';
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
-import { voice } from './voice';
-import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
+import { clipSeconds, voice } from './voice';
+import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, sessionEnd, set, type BoothState } from './store';
 
 /* ------------------------------------------------------------------ abort token (prototype `tok`) */
 
@@ -390,6 +390,18 @@ function setCapture(p: Partial<BoothState['capture']>) {
   set({ capture: { ...get().capture, ...p } });
 }
 
+/** Bubble after each shot; voice clip is `sess_nice_<index+1>` (≤2s, the bubble shows 2s). */
+const NICE = [
+  'Bagus banget!',
+  'Keren abis!',
+  'Nice!',
+  'Mantul!',
+  'Gaya kamu oke!',
+  'Fotogenik banget!',
+  'Posenya pas banget!',
+  'Senyumnya juara!',
+];
+
 async function runSession(retakeAngle: number | null) {
   if (captureRunning) return;
   captureRunning = true;
@@ -399,9 +411,13 @@ async function runSession(retakeAngle: number | null) {
     if (retakeAngle === null) {
       // READY: "Mulai dalam N detik"
       const total = get().session?.plan.readySeconds ?? cfg.session.readySeconds;
+      set({ readyCd: total });
+      // Stretch the digits to the countdown clip so screen and voice end together.
+      const step = Math.max(900, ((await clipSeconds('countdown')) * 1000) / total);
+      set({ deadline: Date.now() + scaleMs(step * total) });
       for (let cd = total; cd > 0; cd--) {
         set({ readyCd: cd });
-        await wait(900, t);
+        await wait(step, t);
       }
     }
     await runCapture(t, retakeAngle);
@@ -424,6 +440,8 @@ async function runSession(retakeAngle: number | null) {
 async function runCapture(t: number, retakeAngle: number | null) {
   if (retakeAngle === null) await sendResilient({ type: 'move', angle: 0 }, 30000);
   const started = Date.now();
+  const angles = () => (retakeAngle === null ? plan(get()).angles : 1);
+  set({ deadline: sessionEnd(started, angles(), 0, 0) });
   // A retake shoots one pose; cap it well below the full-session limit.
   const limitMs = retakeAngle === null ? api.captureLimitMs : 120000;
   let seenActive = false;
@@ -438,6 +456,8 @@ async function runCapture(t: number, retakeAngle: number | null) {
   let firedKey: number | null = null;
   /** When "Jepret!" showed; non-null until the photo arrives (or gives up). */
   let snapAt: number | null = null;
+  /** Last "nice" line shown, so the next shot never repeats it. */
+  let nice = -1;
   const ticker = setInterval(() => {
     if (shutterAt === null || t !== tok) return;
     const left = shutterAt - Date.now();
@@ -451,7 +471,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
       cd('snap');
       flash();
       const s = get().session;
-      voice('snap_' + sessionTip(s?.id ?? '', angle, 0, s?.plan.shotsPerAngle ?? 2)[3], true);
+      voice('snap_' + sessionTip(s?.id ?? '', angle, 0, s?.plan.shotsPerAngle ?? 2)[3]);
       return;
     }
     const digit = left > 2000 ? 3 : left > 1000 ? 2 : 1;
@@ -459,8 +479,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
       lastCd = digit;
       setCapture({ phase: 'cd' });
       cd(digit);
-      // ponytail: queued, so a tip still talking delays the number; SEQUENCE_PREP_SEC keeps that rare.
-      voice(['satu', 'dua', 'tiga'][digit - 1], true);
+      voice(['satu', 'dua', 'tiga'][digit - 1]);
     }
   }, 50);
   try {
@@ -487,12 +506,17 @@ async function runCapture(t: number, retakeAngle: number | null) {
         shutterAt = null;
         lastCd = null;
         const last = get().session!.photos.at(-1)!;
-        const msg = retakeAngle !== null ? 'Foto baru tersimpan!' : new Set(get().session!.photos.map((p) => p.angle)).size < total ? 'Bagus banget!' : 'Mantap! Semua angle selesai.';
+        const doneAngles = new Set(get().session!.photos.map((p) => p.angle)).size;
+        const more = retakeAngle === null && doneAngles < total;
+        set({ deadline: sessionEnd(started, angles(), retakeAngle === null ? doneAngles : 1, Date.now()) });
+        if (more) nice = (nice + 1 + Math.floor(Math.random() * (NICE.length - 1))) % NICE.length;
+        const msg = retakeAngle !== null ? 'Foto baru tersimpan!' : more ? NICE[nice] : 'Mantap! Semua angle selesai.';
         // Frozen frame stays up while the real photo decodes, so the swap has no blank gap.
         await preload(last.previewUrl, 3000);
         if (t !== tok) throw new Aborted();
         snapAt = null;
         setCapture({ angle, phase: 'nice', cd: null, message: msg, shotUrl: last.previewUrl, freeze: false });
+        voice(retakeAngle !== null ? 'sess_retake_ok' : more ? `sess_nice_${nice + 1}` : 'sess_done');
         await wait(2000, t);
         setCapture({ shotUrl: null });
         continue;
@@ -522,7 +546,10 @@ async function runCapture(t: number, retakeAngle: number | null) {
         shutterAt = Date.now() + leftMs;
         lastCd = null;
       }
-      if (shutterAt === null && snapAt === null) setCapture({ angle, phase: fsm === 'TRACKING' || fsm === 'CAPTURING' || rc?.auto_capture_active ? 'prep' : 'move', cd: null });
+      if (shutterAt === null && snapAt === null) {
+        const prepEnd = fsm === 'TRACKING' && seq ? Date.now() + seq.seconds_left * 1000 : 0;
+        setCapture({ angle, phase: fsm === 'TRACKING' || fsm === 'CAPTURING' || rc?.auto_capture_active ? 'prep' : 'move', cd: null, prepEnd });
+      }
     }
   } finally {
     clearInterval(ticker);
@@ -577,6 +604,7 @@ export function retake(angle: number) {
 export function skipSession() {
   captureRunning = false;
   tok++;
+  voice('sess_skip');
   robot.rbNav('Selesai!', 'cheer', () => {
     if (get().busy) return;
     void send({ type: 'skip_angles' });
@@ -756,7 +784,8 @@ export function resetToWelcome() {
     busy: null,
     notice: null,
     clientError: null,
-    idle: null,
+    timer: null,
+    deadline: null,
     readyCd: get().config?.session.readySeconds ?? 5,
   });
   void refreshHealth();

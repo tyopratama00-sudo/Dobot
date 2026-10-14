@@ -212,7 +212,8 @@ class FloatingRobot {
     const i = this.F.n++ % RESP.length;
     const r = RESP[i];
     this.react(r.pose, r.an, r.t(), r.fx, 1.9);
-    voice(`tap_${i + 1}`);
+    // A tap must not cut the countdown or pose tips: wait behind them there.
+    voice(`tap_${i + 1}`, this.screen === 'ready' || this.screen === 'session');
   };
 
   private elementUnder(x: number, y: number): HTMLElement | null {

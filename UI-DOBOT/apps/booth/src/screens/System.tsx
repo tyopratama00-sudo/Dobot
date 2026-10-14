@@ -73,30 +73,6 @@ export function ReconnectOverlay() {
   );
 }
 
-export function IdleOverlay() {
-  const idle = useBooth((s) => s.idle);
-  if (!idle) return null;
-  const text =
-    idle.kind === 'unpaid'
-      ? 'Sesi akan dibatalkan dan kembali ke awal.'
-      : idle.kind === 'paid'
-        ? 'Tenang, robot akan memilihkan foto terbaik dan langsung mencetaknya.'
-        : 'Layar akan kembali ke awal.';
-  return (
-    <div className="ovl" data-testid="idle-warning">
-      <div className="card">
-        <Robot m="think" s={200} />
-        <h2>Masih di sana?</h2>
-        <div className="count">{idle.secondsLeft}</div>
-        <p className="p">{text}</p>
-        <button className="btn pr" onClick={() => set({ idle: null })} data-testid="idle-stay">
-          SAYA MASIH DI SINI
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function Notice() {
   const notice = useBooth((s) => s.notice);
   if (!notice) return null;

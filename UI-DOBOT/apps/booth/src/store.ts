@@ -45,13 +45,25 @@ export interface BoothState {
   picks: string[];
   edits: Record<number, EditParams>;
   slot: number;
-  capture: { angle: number; shot: number; phase: CapturePhase; message: string; cd?: number | 'cam' | 'snap' | null; cdKey?: number; flashKey?: number; shotUrl?: string | null; freeze?: boolean };
+  capture: { angle: number; shot: number; phase: CapturePhase; message: string; cd?: number | 'cam' | 'snap' | null; cdKey?: number; flashKey?: number; shotUrl?: string | null; freeze?: boolean; prepEnd?: number };
   readyCd: number;
   big: string | null;
   busy: string | null;
   notice: string | null;
   clientError: { code: string; message: string } | null;
-  idle: { secondsLeft: number; total: number; kind: 'unpaid' | 'paid' | 'done' } | null;
+  /** On-screen timer: `limit` = page time limit, `ready` = ready countdown, `est` = estimated photo-session end. */
+  timer: { left: number; mode: 'limit' | 'ready' | 'est' } | null;
+  /** End time (ms) of the ready page / estimated end of the photo session. */
+  deadline: number | null;
+}
+
+/** Robot time per angle before any angle finished (move ~3s + SEQUENCE_PREP_SEC 9 + 3-2-1 3 + after-shot 2.5). */
+export const ANGLE_MS = 17000;
+
+/** Estimated photo-session end: average real angle time once one is done, else ANGLE_MS. */
+export function sessionEnd(started: number, total: number, done: number, lastDoneAt: number) {
+  const per = done ? (lastDoneAt - started) / done : ANGLE_MS;
+  return started + per * total;
 }
 
 export const useBooth = create<BoothState>(() => ({
@@ -78,7 +90,8 @@ export const useBooth = create<BoothState>(() => ({
   busy: null,
   notice: null,
   clientError: null,
-  idle: null,
+  timer: null,
+  deadline: null,
 }));
 
 export const set = useBooth.setState;

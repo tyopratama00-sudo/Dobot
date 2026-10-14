@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import { UNPAID_STATES, type BoothScreen } from '@photobooth/shared';
-import { currentScreen, get, set, useBooth } from './store';
+import { currentScreen, get, set, useBooth, type BoothState } from './store';
 import { boot, onIdleTimeout } from './flow';
 import { robot } from './robot/floating';
 import { Welcome } from './screens/Welcome';
@@ -10,7 +10,7 @@ import { Lightbox, Review } from './screens/Review';
 import { Pick, Tpl } from './screens/Select';
 import { Edit } from './screens/Edit';
 import { Final, Print, Qr, Thanks } from './screens/Output';
-import { DevBar, ErrorScreen, IdleOverlay, Maintenance, Notice, ReconnectOverlay } from './screens/System';
+import { DevBar, ErrorScreen, Maintenance, Notice, ReconnectOverlay } from './screens/System';
 import { Robot } from './components/basics';
 import { hush, voice } from './voice';
 
@@ -29,12 +29,15 @@ const SCREEN_VOICE: Partial<Record<BoothScreen | 'maintenance', string[]>> = {
   error: ['err_general'],
 };
 
+/** Prep-gap fillers with their length in seconds (ponytail: hand-measured; update when re-recorded). */
+const HOLDS: [string, number][] = [['hold_1', 1.6], ['hold_2', 2.1], ['hold_4', 1.4]];
+
 /** Voice cue on screen change, plus the few status changes inside one screen. */
 function useScreenVoice(screen: BoothScreen | 'maintenance') {
   const status = useBooth((s) => s.session?.status);
   const expired = useBooth((s) => s.session?.payment?.status === 'EXPIRED');
   const online = useBooth((s) => s.online);
-  const idle = useBooth((s) => !!s.idle);
+  const idle = useBooth((s) => s.timer?.mode === 'limit' && s.timer.left <= (s.config?.timeouts.warningSeconds ?? 15));
   const last = useRef('');
   useEffect(() => {
     const changed = screen !== last.current;
@@ -42,8 +45,7 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
     if (status === 'PAYMENT_SUCCESS') voice('pay_ok');
     else if (status === 'PAYMENT_FAILED') voice(expired ? 'pay_qr_expired' : 'pay_retry');
     else if (status === 'PRINT_SUCCESS') voice('print_done');
-    // Queue behind the button cue (e.g. "Saatnya edit!") instead of cutting it.
-    else if (changed && SCREEN_VOICE[screen]) voice(SCREEN_VOICE[screen]!, true);
+    else if (changed && SCREEN_VOICE[screen]) voice(SCREEN_VOICE[screen]!);
   }, [screen, status, expired]);
   // Session: announce the next angle while the robot moves, then the pose tip.
   const c = useBooth((s) => s.capture);
@@ -59,9 +61,14 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
     if (said.current.has(key)) return;
     said.current.add(key);
     const pose = sessionPose('prep', c.angle, c.shot, spa, seed);
-    if (c.phase === 'move') voice(c.angle === 0 ? 'ready_intro' : c.angle === angles - 1 ? 'ready_last' : 'ready_next', true);
-    // Tip waits for the angle announcement; SEQUENCE_PREP_SEC (dobot/.env) is sized for ready_* + pose_*.
-    else if (c.phase === 'prep') voice('pose_' + pose, true);
+    if (c.phase === 'move') voice(c.angle === 0 ? 'ready_intro' : c.angle === angles - 1 ? 'ready_last' : 'ready_next');
+    // Tip cuts the angle announcement if it is still talking; SEQUENCE_PREP_SEC (dobot/.env) is sized for ready_* + pose_*.
+    else if (c.phase === 'prep') {
+      voice('pose_' + pose);
+      // Fill the quiet gap before 3-2-1, only if the clip ends ≥0.5s before the countdown.
+      const [hold, sec] = HOLDS[Math.floor(Math.random() * HOLDS.length)];
+      voice(hold, true, () => Date.now() + (sec + 0.5) * 1000 <= (get().capture.prepEnd ?? 0));
+    }
   }, [screen, c.phase, c.angle, c.shot]);
   // Welcome invite repeats every 15s, only while the welcome page is up.
   useEffect(() => {
@@ -80,6 +87,7 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
   useEffect(() => {
     if (idle && screen === 'pay') voice('pay_wait');
     else if (idle && screen === 'edit') voice('edit_warn');
+    else if (idle && ['review', 'tpl', 'pick', 'final'].includes(screen)) voice('idle_warn');
   }, [idle, screen]);
 }
 
@@ -129,16 +137,11 @@ const SCREENS: Record<BoothScreen, () => JSX.Element> = {
 };
 
 /** Per-screen inactivity timeouts with a visible warning countdown. */
-function useIdleMonitor() {
+/** Page timer: counts from when the page opened (touches don't reset it), then runs the page's timeout. */
+function useTimer() {
   useEffect(() => {
-    let last = Date.now();
+    let since = Date.now();
     let lastScreen = '';
-    const touch = () => {
-      last = Date.now();
-      if (get().idle) set({ idle: null });
-    };
-    window.addEventListener('pointerdown', touch, true);
-    window.addEventListener('keydown', touch, true);
     const t = setInterval(() => {
       const s = get();
       const cfg = s.config?.timeouts;
@@ -146,13 +149,21 @@ function useIdleMonitor() {
       const scr = currentScreen(s);
       if (scr !== lastScreen) {
         lastScreen = scr;
-        last = Date.now();
+        since = Date.now();
+      }
+      const show = (timer: BoothState['timer']) => (s.timer?.left !== timer?.left || s.timer?.mode !== timer?.mode) && set({ timer });
+      if ((scr === 'ready' || scr === 'session') && s.deadline) {
+        return show({ left: Math.max(0, Math.ceil((s.deadline - Date.now()) / 1000)), mode: scr === 'ready' ? 'ready' : 'est' });
       }
       const st = s.session?.status;
       const limit =
         scr === 'pay' && st && UNPAID_STATES.has(st)
           ? cfg.paymentSeconds
-          : scr === 'review' || scr === 'tpl' || scr === 'pick'
+          : scr === 'tpl'
+            ? cfg.frameSeconds
+            : scr === 'pick'
+            ? cfg.pickSeconds
+            : scr === 'review'
             ? cfg.selectionSeconds
             : scr === 'edit'
               ? cfg.editingSeconds
@@ -165,28 +176,31 @@ function useIdleMonitor() {
                     : scr === 'error'
                       ? cfg.errorResetSeconds * 3
                       : 0;
-      if (!limit || s.busy) {
-        last = Date.now();
-        if (s.idle) set({ idle: null });
-        return;
-      }
-      const elapsed = (Date.now() - last) / 1000;
-      const kind = scr === 'pay' ? 'unpaid' : scr === 'qr' || scr === 'thanks' || scr === 'error' ? 'done' : 'paid';
-      if (elapsed >= limit) {
-        last = Date.now();
-        set({ idle: null });
+      if (!limit) return show(null);
+      const left = Math.ceil(limit - (Date.now() - since) / 1000);
+      // Error page keeps its timeout but shows no timer.
+      show(scr === 'error' ? null : { left: Math.max(0, left), mode: 'limit' });
+      if (left <= 0 && !s.busy) {
+        since = Date.now();
         onIdleTimeout();
-      } else if (elapsed >= limit - cfg.warningSeconds && scr !== 'thanks' && scr !== 'error') {
-        const secondsLeft = Math.ceil(limit - elapsed);
-        if (s.idle?.secondsLeft !== secondsLeft) set({ idle: { secondsLeft, total: cfg.warningSeconds, kind } });
-      } else if (s.idle) set({ idle: null });
+      }
     }, 250);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener('pointerdown', touch, true);
-      window.removeEventListener('keydown', touch, true);
-    };
+    return () => clearInterval(t);
   }, []);
+}
+
+const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+
+function Timer() {
+  const timer = useBooth((s) => s.timer);
+  const warn = useBooth((s) => s.config?.timeouts.warningSeconds ?? 15);
+  if (!timer) return null;
+  const { left, mode } = timer;
+  return (
+    <div className={`timer ${mode === 'limit' && left <= warn ? 'warn' : ''}`} data-testid="timer" role="timer" aria-live="off">
+      ⏱ {mode === 'est' ? (left > 0 ? `± ${mmss(left)}` : 'sebentar lagi') : mmss(left)}
+    </div>
+  );
 }
 
 export function App() {
@@ -206,7 +220,7 @@ export function App() {
   useEffect(() => {
     void boot();
   }, []);
-  useIdleMonitor();
+  useTimer();
   useScreenVoice(maintenance ? 'maintenance' : screen);
 
   // Re-evaluate the screen when a "hold" (print failure message) ends.
@@ -241,7 +255,7 @@ export function App() {
         <FloatingRobotHost />
         <Lightbox />
         <Notice />
-        <IdleOverlay />
+        <Timer />
         <ReconnectOverlay />
       </div>
       <DevBar />

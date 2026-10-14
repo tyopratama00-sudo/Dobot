@@ -27,39 +27,42 @@ class FakeAudio {
 let last: FakeAudio;
 (globalThis as any).Audio = FakeAudio;
 
-test('playing clip is never cut; newer chatter replaces waiting chatter, keep cues stay', async () => {
+test('new cue cuts the playing clip and drops the waiting ones; a list plays in order', async () => {
   const { voice } = await import('./voice');
-  voice('a');
+  voice(['pay_qty', 'pay_show']);
   const a = last;
-  voice('pose', true);
-  voice('b');
-  voice('c');
-  expect(a.paused).toBe(false);
-  a.end();
+  voice('pick_add');
+  const b = last;
+  voice(['pose_x', 'tiga']);
+  expect(a.paused).toBe(true);
+  expect(b.paused).toBe(true);
   last.end();
-  expect(played).toEqual(['a.mp3', 'pose.mp3', 'c.mp3']);
+  expect(played).toEqual(['pay_qty.mp3', 'pick_add.mp3', 'pose_x.mp3', 'tiga.mp3']);
   last.end();
 });
 
-test('hush drops a waiting clip only', async () => {
+test('hush cuts the playing clip and drops waiting copies', async () => {
   const { voice, hush } = await import('./voice');
   played.length = 0;
-  voice('welcome_idle');
+  voice(['welcome_idle', 'welcome_idle', 'pay_show']);
   const w = last;
-  voice('welcome_idle');
   hush('welcome_idle');
-  voice('pay_show', true);
-  expect(w.paused).toBe(false);
-  w.end();
+  expect(w.paused).toBe(true);
   expect(played).toEqual(['welcome_idle.mp3', 'pay_show.mp3']);
   last.end();
 });
 
-test('missing clip plays the fallback from its offset', async () => {
+test('`after` filler waits its turn and is skipped if `when` fails; missing clip moves on', async () => {
   const { voice } = await import('./voice');
   played.length = 0;
-  voice('snap_wave', true, 'countdown@1.96');
-  last.fail();
-  expect(played).toEqual(['snap_wave.mp3', 'countdown.mp3']);
-  expect((last as any).currentTime).toBe(1.96);
+  let fits = true;
+  voice('pose_laugh');
+  const p = last;
+  voice('hold_2', true, () => fits);
+  voice('hold_1', true);
+  expect(p.paused).toBe(false);
+  fits = false;
+  p.fail();
+  expect(played).toEqual(['pose_laugh.mp3', 'hold_1.mp3']);
+  last.end();
 });
