@@ -175,8 +175,8 @@ Penyesuaian UX untuk kiosk **layar sentuh** (tanpa mouse/keyboard fisik):
 
 ```
 ┌─────────────────────────────┐         ┌────────────────────────────┐
-│  Frontend (Next.js 16)      │         │  Backend (Go + Chi)        │
-│  Port 3000                  │ ◀────▶  │  Port 8080                 │
+│  Booth (Vite + React)       │         │  Backend (Go + Chi)        │
+│  Port 5173                  │ ◀────▶  │  Port 8080                 │
 │  - Kiosk UI                 │   HTTP  │  - REST API                │
 │  - Photo editor             │   CORS  │  - Storage files           │
 │  - QR code generation       │         │  - Robot proxy             │
@@ -221,20 +221,9 @@ Penyesuaian UX untuk kiosk **layar sentuh** (tanpa mouse/keyboard fisik):
 - **[Google Drive API](https://developers.google.com/drive)** — upload hasil sesi ke Drive (opsional)
 
 ### Frontend
-- **Next.js 16** (Turbopack, App Router)
-- **React 19**
-- **TypeScript 5**
-- **Tailwind CSS 4**
-- **TanStack Query 5** — server state
-- **Axios** — HTTP client
-- **Fabric.js 5** — canvas for photo editor
-- **qrcode.react** — QR code generation
-- **lottie-react** — loading animations
-- **lucide-react** — icons
-- **Radix UI** — primitives (dialog, slot)
-- **Recharts** — grafik dashboard admin
-- **react-hook-form + Zod** — form + validasi (form admin)
-- **xlsx, jsPDF (+autotable)** — export transaksi ke Excel/PDF
+- **Vite + React 18 + TypeScript** — kiosk booth di `frontend/apps/booth`
+- **Fastify + React admin** tersedia di workspace, tetapi masih memakai API/schema berbeda; launcher Glambot memakai backend Go.
+- **xlsx** — tooling master script audio
 - **sonner** — toast notifications
 - **date-fns, react-day-picker** — util & picker tanggal
 - **next-themes** — tema (light/dark)
@@ -348,7 +337,7 @@ SESSION_EXPIRY_HOURS=72
 CLEANUP_INTERVAL_HOURS=24
 
 # CORS allowed origin
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5173
 
 # Camera: Canon-only via digiCamControl (lihat DIGICAM_BASE_URL).
 
@@ -373,23 +362,22 @@ GOOGLE_REFRESH_TOKEN=
 GOOGLE_DRIVE_FOLDER_ID=
 ```
 
-### Frontend (`frontend/.env.local`)
+### Booth (`frontend/.env`)
 
 ```ini
 # Backend API URL
 # - Kosongkan untuk auto-detect dari hostname (recommended kalau akses dari HP via LAN)
 # - Set ke http://localhost:8080 untuk dev di mesin sendiri
 # - Set ke http://192.168.x.x:8080 untuk cross-device testing
-NEXT_PUBLIC_API_URL=http://localhost:8080
+VITE_API_PROXY=http://localhost:8080
 
 # QR code download URL override (opsional)
 # Set kalau kiosk diakses via localhost tapi QR harus encode LAN IP
-# NEXT_PUBLIC_DOWNLOAD_PUBLIC_URL=http://192.168.1.150:3000
+VITE_ROBOT_PROXY=http://localhost:5001
 
 # URL service dobot (Flask :5001) untuk panel Gesture Detection
 # - Kosongkan untuk auto-derive dari hostname halaman + :5001 (cocok kiosk & LAN)
 # - Set ke http://localhost:5001 untuk dev satu mesin
-NEXT_PUBLIC_ROBOT_URL=http://localhost:5001
 ```
 
 ---
@@ -459,21 +447,21 @@ Lalu copy file `frame-custom.svg` ke `backend/storage/frames/`.
 .\start.ps1
 ```
 
-Atau double-click `start.bat`. Skrip [`start.ps1`](start.ps1) menyalakan ketiga service sekaligus di **satu window Windows Terminal, 3 pane** (backend kiri, frontend kanan-atas, dobot kanan-bawah), lalu membuka Chrome kiosk ke `http://localhost:3000` setelah frontend benar-benar melayani request.
+Atau double-click `start.bat`. Skrip [`start.ps1`](start.ps1) menyalakan Go backend, booth Vite, dan Dobot di **satu window Windows Terminal, 3 pane** (backend kiri, booth kanan-atas, dobot kanan-bawah), lalu membuka Chrome kiosk ke `http://localhost:5173`.
 
-> **Frontend jalan mode production**, bukan dev: `npm run build` dulu lalu `npm run start`. Tidak ada HMR dan perubahan kode baru kelihatan setelah start ulang — tukarannya navigasi antar halaman instan karena tidak ada compile-on-demand, yang memang yang dimau di kiosk. Kalau lagi ngoding dan butuh HMR, pakai `-Dev`.
+> **Booth jalan mode production**, bukan dev: launcher build workspace booth lalu jalankan Vite preview di port `5173`. Untuk HMR, pakai `-Dev`.
 >
-> **Build cuma jalan kalau ada yang berubah.** Start kedua dan seterusnya tanpa ngedit apa pun langsung `npm run start` — hitungan detik, bukan menit.
+> Build booth berjalan saat launcher start.
 
 Urutannya:
 
-1. **Cek prasyarat** — `go`/`npm` di PATH, `backend/.env`, `dobot/.env`, `frontend/.env.local`, `dobot/venv/`, `frontend/node_modules/`. Kalau ada yang kurang, langsung berhenti sambil menyebut mana yang kurang dan cara memperbaikinya.
-2. **Bunuh proses yang masih pegang port** 8080 / 3000 / 5001. Ini yang paling sering jadi biang "gagal bind tanpa pesan jelas" — `go run .` di Windows spawn child exe yang tidak ikut mati waktu terminalnya ditutup paksa. Perlu diingat: skripnya tidak pilih-pilih, **apa pun** yang pegang ketiga port itu dimatikan tanpa nanya. Kalau kamu lagi jalanin project lain di `:3000`, matikan dulu.
-3. **Bersihin cache ringan** — `__pycache__` dobot dihapus, profil browser di-reset. `frontend/.next` **tidak** dihapus supaya `next build` bisa incremental; pakai `-Clean` kalau memang butuh build dari nol.
+1. **Cek prasyarat** — `go`/`npm` di PATH, `backend/.env`, `dobot/.env`, `dobot/venv/`, dan `frontend/node_modules/`.
+2. **Bunuh proses yang masih pegang port** 8080 / 5173 / 5001. Skrip menghentikan proses yang pegang port itu.
+3. **Bersihin cache ringan** — `__pycache__` dobot dan profil browser dibersihkan. `-Clean` menghapus output build booth.
 4. **Nyalakan service secara berantai** — `backend → dobot → frontend`, detailnya di bawah.
 5. **Buka kiosk** dengan `--user-data-dir` temp yang dibuang tiap start, jadi cache browser selalu bersih.
 
-Skripnya nunggu sampai `http://localhost:3000` benar-benar merespons — bukan cuma sampai portnya kebuka — baru Chrome dilaunch, jadi kiosk tidak pernah kebuka ke halaman yang belum jadi. Batas tunggunya 10 menit (15 menit kalau `-Clean`, 4 menit kalau `-Dev`); itu batas atas, bukan lama tunggu.
+Skripnya nunggu sampai `http://localhost:5173` merespons sebelum buka Chrome kiosk.
 
 #### Urutan start & saling tunggu
 
@@ -484,11 +472,10 @@ backend    ───────────────────────
                 │
 dobot           └─ nunggu :8080 ─────▶  python main.py, listen :5001
                                   │
-frontend   ── next build ─────────┴───▶ nunggu :8080 + :5001, baru npm run start
-           (jalan duluan, tidak antre)
+booth      ── Vite build ─────────┴───▶ nunggu :8080 + :5001, preview :5173
 ```
 
-Kuncinya ada di baris ketiga: **`next build` sengaja dijalankan di awal tanpa nunggu siapa pun.** Build tidak butuh backend maupun dobot, dan dia bagian yang paling lama — jadi dia dibiarkan overlap dengan boot backend + dobot. Waktu build kelar, dua-duanya biasanya sudah siap dan frontend lanjut tanpa jeda. Yang benar-benar diantre cuma `npm run start`-nya. Kalau build dilewati (tidak ada perubahan), frontend langsung masuk antrean.
+Booth dibuild, lalu menunggu backend Go dan service Dobot sebelum Vite preview berjalan.
 
 Kenapa urutannya harus begitu:
 
@@ -501,23 +488,13 @@ Flag yang tersedia:
 
 | Flag | Efek |
 |---|---|
-| `-Dev` | Frontend pakai `npm run dev` (HMR) — buat ngoding, bukan kiosk |
-| `-Rebuild` | Paksa `next build` walau tidak ada perubahan |
-| `-Clean` | Hapus `frontend/.next` dulu — build dari nol, bukan incremental |
+| `-Dev` | Booth pakai `npm run dev -w @photobooth/booth -- --host 0.0.0.0` (HMR) |
+| `-Rebuild` | Build booth ulang |
+| `-Clean` | Hapus `frontend/apps/booth/dist` sebelum build |
 | `-NoRobot` | Dobot jalan `--no-robot` (vision saja, tanpa hardware) |
 | `-NoBrowser` | Jangan buka Chrome, cuma nyalakan service |
 
-#### Kapan `next build` jalan, kapan dilewati
-
-Sesudah build sukses, skrip menyimpan sidik jari SHA-256 dari semua input build ke `frontend/.next/.glambot-build-stamp`. Di start berikutnya sidik jari itu dihitung ulang (~0,5 detik) dan dibandingkan — kalau sama persis, build dilewati.
-
-Yang ikut dihitung: seluruh isi `src/` dan `public/`, lalu `package.json`, `package-lock.json`, `next.config.ts`, `tsconfig.json`, `postcss.config.mjs`, `components.json`, `eslint.config.mjs`, dan **`.env` / `.env.local` / `.env.production`**.
-
-> File `.env*` sengaja ikut dan ini bagian yang paling penting. Semua `NEXT_PUBLIC_*` di-**inline ke bundle klien saat build**, bukan dibaca waktu runtime. Kalau `NEXT_PUBLIC_API_URL` diganti (misal dari `localhost` ke IP LAN untuk akses HP) tapi build-nya dilewati, bundle lama tetap dipakai dan kiosk masih nembak API yang lama — gagalnya diam-diam, halaman kelihatan normal tapi datanya tidak masuk.
-
-Yang **tidak** ikut: `node_modules/` (sudah terwakili `package-lock.json`), `.next/`, dan `*.tsbuildinfo` — dua terakhir itu output, bukan input.
-
-Yang dibandingkan **isi file**, bukan timestamp. Jadi `git checkout`/`git pull` yang nulis ulang file dengan isi identik tidak memicu rebuild percuma, sementara edit sekecil apa pun tetap kedeteksi. Build juga dipaksa kalau `.next/BUILD_ID` tidak ada — penanda itu cuma dibuat `next build`, jadi ketiadaannya berarti `.next` bukan hasil build production dan `npm run start` bakal nolak jalan.
+Booth memakai default Go `http://localhost:8080` dan proxy Dobot `http://localhost:5001`. Override proxy lewat `apps/booth/.env`.
 
 Port dibaca otomatis dari `APP_PORT` (backend/.env) dan `PORT` (dobot/.env), jadi kalau diubah di `.env` skripnya ikut menyesuaikan. Kalau Windows Terminal tidak terpasang, otomatis fallback ke 3 window console terpisah.
 
@@ -535,14 +512,14 @@ Pakai `Ctrl+C`, jangan langsung tutup window, karena ketiganya punya rutinitas b
 
 - **Backend** — `srv.Shutdown()` nunggu request yang lagi jalan selesai (maks 10 detik) lalu nutup koneksi DB ([`main.go`](backend/main.go)). Kalau dikill paksa saat lagi compose foto, hasilnya bisa setengah jadi.
 - **Dobot** — blok `finally: runtime.stop()` ([`main.py`](dobot/main.py)) melepas handle kamera dan men-disable lengan robot. Kalau dikill paksa, kamera bisa ke-lock (`CAMERA_INDEX` gagal dibuka di run berikutnya) dan lengan ditinggal dalam keadaan enabled.
-- **Frontend** — paling tidak rewel, tapi `npm` di Windows kadang ninggalin proses `node` yatim yang masih pegang `:3000`.
+- **Booth** — Vite preview listen di `:5173`.
 
-Kalau terlanjur ketutup paksa atau ada yang nyangkut, **tidak usah dibersihin manual** — `start.ps1` selalu kill apa pun yang megang port 8080/3000/5001 di awal, jadi tinggal jalankan lagi.
+Kalau proses nyangkut, `start.ps1` menghentikan pemegang port 8080/5173/5001 saat start.
 
 Ngecek masih ada yang jalan atau nggak:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 8080,3000,5001 -State Listen -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort 8080,5173,5001 -State Listen -ErrorAction SilentlyContinue |
     Select-Object LocalPort, @{n='Proses';e={(Get-Process -Id $_.OwningProcess).ProcessName}}
 ```
 
@@ -556,39 +533,40 @@ go run .
 
 Backend listen di `http://localhost:8080` (atau `:8080` di semua interface untuk LAN access).
 
-**Terminal 2 — Frontend:**
+**Terminal 2 — Booth:**
 ```bash
 cd frontend
-npm run dev
+npm run dev -w @photobooth/booth -- --host 0.0.0.0
 ```
 
-Frontend di `http://localhost:3000`. Open dari browser kiosk.
+Booth kiosk di `http://localhost:5173`.
 
 ### Akses dari HP (LAN)
 
 Di PC dev (Windows):
 1. Cari IP LAN: `ipconfig` → catat "IPv4 Address" (misal `192.168.1.150`)
-2. Allow Windows Firewall untuk port 3000 + 8080
-3. Edit `frontend/.env.local`:
+2. Allow Windows Firewall untuk port 5173 + 8080
+3. Edit `frontend/.env` bila alamat backend perlu diubah:
    ```ini
-   NEXT_PUBLIC_API_URL=
+   VITE_API_PROXY=http://localhost:8080
    ```
-   (Kosong = auto-detect berdasarkan hostname browser. HP akses via `192.168.1.150:3000` → frontend otomatis fetch dari `192.168.1.150:8080`.)
+   Vite proxy teruskan API ke Go backend.
 4. Restart `npm run dev`
 
 Di HP (browser):
-- Buka `http://192.168.1.150:3000` untuk kiosk view
-- Atau scan QR code dari kiosk untuk langsung ke `/download-photos/[sessionId]`
+- Buka `http://<kiosk-ip>:5173` untuk booth. QR hasil sesi membuka endpoint GIF Go backend.
 
 ---
 
 ## Admin Dashboard
 
+Admin Next lama tidak ikut dimigrasikan. Admin React di workspace memakai Fastify/Prisma, bukan Go backend; integrasi admin harus dikerjakan terpisah.
+
 Dashboard internal untuk kelola konten kiosk tanpa sentuh database langsung.
 
 ### Login
 
-- URL: `http://localhost:3000/login`
+- URL: Belum tersedia untuk Go backend. Admin baru masih perlu integrasi API.
 - Kredensial default (dari env, di-seed saat tabel `admins` kosong):
   - Email: `ADMIN_EMAIL` (default `admin@glambot.com`)
   - Password: `ADMIN_PASSWORD` (default `admin123`)
@@ -643,11 +621,11 @@ go build -o photobooth .       # Linux/Mac
 
 ```bash
 cd frontend
-npm run build
-npm run start
+npm run build -w @photobooth/booth
+npm run preview -w @photobooth/booth -- --host 0.0.0.0
 ```
 
-Production server di `http://localhost:3000`. **Tidak ada HMR**, lebih cepat, tidak ada `allowedDevOrigins` restriction.
+Booth preview tersedia di `http://localhost:5173`. Untuk jalankan, gunakan `start.ps1` dari root repository.
 
 ---
 
@@ -975,7 +953,7 @@ Diskon code.
 
 ### Flow HP (download)
 
-User scan QR code di `/session-end` → buka `http://<kiosk-ip>:3000/download-photos/{sessionId}` di HP.
+Booth QR membuka endpoint GIF Go backend pada port `8080`; foto lain tetap disimpan di backend storage.
 
 ```
 [ /download-photos/{sessionId} ]
@@ -1239,10 +1217,10 @@ curl -X POST http://localhost:8080/api/robot/done -H "Content-Type: application/
 - Pastikan database `photobooth` sudah dibuat
 
 ### Frontend blank saat akses via LAN IP
-- Cek `frontend/.env.local` → set `NEXT_PUBLIC_API_URL=` (kosong) atau ke LAN IP yang sama
+- Pastikan Vite Go proxy reachable dari kiosk; buka booth via LAN IP pada port `5173`.
 - Restart `npm run dev` setelah ubah env
 - Pastikan `allowedDevOrigins` di `next.config.ts` include IP Anda
-- Windows Firewall: allow TCP port 3000 + 8080
+- Windows Firewall: allow TCP port 5173 + 8080
 
 ### Live preview kosong / "Stream tidak tersedia"
 Kamera Canon-only via digiCamControl — kalau preview kosong:
@@ -1253,8 +1231,7 @@ Kamera Canon-only via digiCamControl — kalau preview kosong:
 
 ### QR code di kiosk tidak bisa di-scan dari HP
 - QR encode current `window.location.origin` + sessionId
-- Kalau kiosk diakses via `localhost:3000`, QR encode `localhost:3000/...` → HP tidak bisa resolve
-- Solusi: akses kiosk dari LAN IP, atau set `NEXT_PUBLIC_DOWNLOAD_PUBLIC_URL=http://192.168.x.x:3000` di `frontend/.env.local`
+- Buka kiosk dari LAN IP agar browser HP dapat menjangkau host.
 
 ### Audio tidak play
 - Browser block autoplay sebelum user interaction
@@ -1272,7 +1249,7 @@ Kamera Canon-only via digiCamControl — kalau preview kosong:
 
 ### Build production fail "Cross origin request blocked"
 - Hanya dev mode yang punya restriction ini
-- `npm run build && npm run start` (production) tidak block
+- `npm run build -w @photobooth/booth` dan `npm run preview -w @photobooth/booth` menjalankan booth production
 
 ### Live Strip GIF: foto burst tampak "diluar frame" di awal animasi
 - Bug compositing lama — burst di-draw ON TOP framed strip, ke-timpa frame border

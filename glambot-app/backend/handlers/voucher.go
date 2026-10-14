@@ -43,7 +43,7 @@ func ApplyVoucher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	totalPrice := getSessionTotalPrice(session)
+ totalPrice := getSessionTotalPrice(session)
 
 	// Cari voucher di DB
 	var v models.Voucher

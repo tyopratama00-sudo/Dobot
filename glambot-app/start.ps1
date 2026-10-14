@@ -1,31 +1,18 @@
 <#
     Glambot Photo Booth - one-command launcher.
 
-    Nyalain backend (Go), frontend (Next.js), dan dobot (Python) sekaligus di
-    satu window Windows Terminal (3 pane), lalu buka Chrome kiosk ke frontend
+    Nyalain backend (Go), booth (Vite), dan dobot (Python) sekaligus di
+    satu window Windows Terminal (3 pane), lalu buka Chrome kiosk ke booth
     dengan profil browser yang baru tiap start.
 
-    Urutannya berantai -- backend -> dobot -> frontend -- dan tiap pane nunggu
+    Urutannya berantai -- backend -> dobot -> booth -- dan tiap pane nunggu
     gilirannya sendiri dengan cara ngecek port pendahulunya:
 
         backend    langsung jalan
         dobot      nunggu :APP_PORT   -> baru python main.py
-        frontend   nunggu :APP_PORT + :PORT(dobot) -> baru npm run start
+        booth      nunggu :APP_PORT + :PORT(dobot) -> baru npm run preview
 
-    Kecuali `next build`: itu dijalankan di awal tanpa nunggu siapa pun, karena
-    build tidak butuh service mana pun dan dia bagian yang paling lama. Jadi
-    build overlap dengan boot backend + dobot; antriannya praktis gratis.
-    Yang diantre cuma `npm run start`-nya.
-
-    Frontend defaultnya production: `npm run build` lalu `npm run start`. Tidak
-    ada HMR, dan perubahan kode BARU kelihatan setelah start ulang -- tukarannya
-    navigasi antar halaman instan (tidak ada compile-on-demand kayak dev mode),
-    yang memang yang dimau di kiosk.
-
-    `next build` cuma dijalankan kalau ada yang berubah. Sidik jari isi src/,
-    public/, config, dan .env* disimpan di .next\.glambot-build-stamp sesudah
-    build sukses; kalau sidik jarinya sama persis, build dilewati dan langsung
-    `npm run start`.
+    Booth defaultnya production: build lalu preview. Pakai `-Dev` untuk HMR.
 
     Sebelum service nyala, skrip menarik update dari origin/main dulu supaya
     kiosk tidak jalan pakai kode kemarin. Langkah ini SELALU fail-soft: offline,
@@ -33,10 +20,10 @@
     semuanya cuma jadi peringatan, start tetap lanjut pakai kode yang ada.
     Repo tidak akan pernah ditinggal dalam keadaan setengah ter-merge.
 
-        .\start.ps1                 update dari main, build kalau perlu, start + kiosk
-        .\start.ps1 -Dev            pakai `npm run dev` (HMR) buat ngoding
-        .\start.ps1 -Rebuild        paksa build walau tidak ada perubahan
-        .\start.ps1 -Clean          + hapus frontend\.next dulu (build dari nol)
+        .\start.ps1                 update dari main, build, start + kiosk
+        .\start.ps1 -Dev            pakai `npm run dev -w @photobooth/booth` (HMR)
+        .\start.ps1 -Rebuild        paksa build booth ulang
+        .\start.ps1 -Clean          + hapus frontend\apps\booth\dist dulu
         .\start.ps1 -NoRobot        dobot jalan tanpa hardware (--no-robot)
         .\start.ps1 -NoBrowser      jangan buka Chrome
         .\start.ps1 -NoPull         jangan ambil update dari main
@@ -47,7 +34,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('backend', 'frontend', 'booth', 'dobot')]
+    [ValidateSet('backend', 'frontend', 'dobot')]
     [string] $Service,
 
     [switch] $Clean,
@@ -63,7 +50,6 @@ $ErrorActionPreference = 'Stop'
 $Root         = $PSScriptRoot
 $BackendDir   = Join-Path $Root 'backend'
 $FrontendDir  = Join-Path $Root 'frontend'
-$BoothDir     = Join-Path (Split-Path $Root -Parent) 'UI-DOBOT'
 $DobotDir     = Join-Path $Root 'dobot'
 $ProfileDir   = Join-Path $env:TEMP 'glambot-kiosk-profile'
 
@@ -194,60 +180,6 @@ function Find-Chrome {
     return $null
 }
 
-# Sidik jari dari semua input yang mempengaruhi hasil `next build`. Dipakai
-# buat nentuin apakah build boleh dilewati.
-#
-# Yang di-hash bukan cuma src/ dan public/ -- .env* WAJIB ikut, karena semua
-# NEXT_PUBLIC_* di-inline ke bundle klien saat build. Kalau NEXT_PUBLIC_API_URL
-# diubah (misal dari localhost ke IP LAN) tapi build-nya dilewati, bundle lama
-# tetap dipakai dan kiosk masih nembak API yang lama -- gagalnya diam-diam,
-# kelihatannya jalan tapi datanya tidak masuk. next.config.ts juga ikut karena
-# isinya bercabang di NODE_ENV.
-#
-# Pakai isi file, bukan timestamp: `git checkout` / `git pull` sering nulis
-# ulang file dengan isi yang sama persis, dan itu tidak perlu rebuild.
-function Get-FrontendFingerprint {
-    $files = @()
-
-    foreach ($sub in @('src', 'public')) {
-        $dir = Join-Path $FrontendDir $sub
-        if (Test-Path $dir) {
-            $files += Get-ChildItem -Path $dir -Recurse -File -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    # node_modules, .next, dan *.tsbuildinfo sengaja tidak ikut: yang pertama
-    # sudah terwakili package-lock.json, dua sisanya justru output.
-    foreach ($name in @(
-        'package.json', 'package-lock.json', 'next.config.ts', 'tsconfig.json',
-        'postcss.config.mjs', 'components.json', 'eslint.config.mjs',
-        '.env', '.env.local', '.env.production'
-    )) {
-        $p = Join-Path $FrontendDir $name
-        if (Test-Path $p) { $files += Get-Item -Path $p -Force }
-    }
-
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        foreach ($f in ($files | Sort-Object -Property FullName)) {
-            # Path ikut di-hash supaya rename/pindah file kedeteksi juga, bukan
-            # cuma perubahan isi.
-            $rel  = $f.FullName.Substring($FrontendDir.Length).Replace('\', '/')
-            $meta = [System.Text.Encoding]::UTF8.GetBytes("$rel`n")
-            [void] $sha.TransformBlock($meta, 0, $meta.Length, $null, 0)
-
-            $data = [System.IO.File]::ReadAllBytes($f.FullName)
-            if ($data.Length -gt 0) {
-                [void] $sha.TransformBlock($data, 0, $data.Length, $null, 0)
-            }
-        }
-        [void] $sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
-        return [System.BitConverter]::ToString($sha.Hash).Replace('-', '')
-    } finally {
-        $sha.Dispose()
-    }
-}
-
 # Tarik update dari origin/main sebelum service nyala.
 #
 # Aturan mainnya: START TIDAK BOLEH GAGAL GARA-GARA GIT. Kiosk yang jalan pakai
@@ -352,7 +284,7 @@ function Sync-FromMain {
 }
 
 # Sesudah update masuk: kasih tahu kalau ada yang butuh langkah manual. Kode Go
-# dan Next.js otomatis ke-rebuild oleh pane masing-masing, TAPI dependency
+# dan booth otomatis di-build oleh pane masing-masing, TAPI dependency
 # (npm/pip) dan skema .env tidak -- itu yang perlu diomongin, bukan didiamkan
 # sampai service-nya error dengan pesan yang tidak nyambung.
 function Show-UpdateImpact {
@@ -362,7 +294,7 @@ function Show-UpdateImpact {
     if (-not $changed) { return }
 
     $notes = @()
-    if ($changed -match '^frontend/package(-lock)?\.json$') {
+    if ($changed -match '^glambot-app/frontend/(package(-lock)?\.json|apps/booth/(package\.json|vite\.config\.ts|\.env\.example))$') {
         $notes += 'dependency frontend berubah -> cd frontend; npm install'
     }
     if ($changed -match '^dobot/requirements\.txt$') {
@@ -385,8 +317,7 @@ function Show-UpdateImpact {
 
 $BackendPort  = [int] (Get-EnvValue (Join-Path $BackendDir  '.env')       'APP_PORT' '8080')
 $DobotPort    = [int] (Get-EnvValue (Join-Path $DobotDir    '.env')       'PORT'     '5001')
-$FrontendPort = [int] (Get-EnvValue (Join-Path $FrontendDir '.env.local') 'PORT'     '3000')
-$BoothPort    = 5173
+$FrontendPort = 5173
 
 # =========================================================================
 #  MODE PANE - dipanggil balik oleh window utama, satu service per pane
@@ -419,110 +350,36 @@ if ($Service) {
 
         'frontend' {
             Set-Location $FrontendDir
-            Write-Host "=== FRONTEND (Next.js) :$FrontendPort ===" -ForegroundColor Magenta
-
-            $npm = Get-ToolPath 'npm.cmd' 'Pasang Node.js dari https://nodejs.org dan pastikan folder-nya masuk PATH.'
-            if (-not $npm) { return }
-
-            if ($Dev) {
-                Write-Host "mode: dev (HMR nyala)" -ForegroundColor DarkGray
-                & $npm run dev
-                return
-            }
-
-            # --- build cuma kalau perlu -----------------------------------
-            $stampFile = Join-Path $FrontendDir '.next\.glambot-build-stamp'
-            $buildId   = Join-Path $FrontendDir '.next\BUILD_ID'
-
-            Write-Host 'mode: production - cek perubahan...' -ForegroundColor DarkGray
-            $sw   = [System.Diagnostics.Stopwatch]::StartNew()
-            $now  = Get-FrontendFingerprint
-            $prev = if (Test-Path $stampFile) { (Get-Content $stampFile -Raw).Trim() } else { '' }
-            $sw.Stop()
-
-            $needBuild = $true
-            if ($Rebuild) {
-                Write-Host '  -Rebuild: build dipaksa' -ForegroundColor DarkGray
-            } elseif (-not (Test-Path $buildId)) {
-                # BUILD_ID cuma dibuat oleh `next build`. Kalau tidak ada,
-                # .next isinya bukan production build -> npm run start bakal
-                # nolak jalan.
-                Write-Host '  belum ada production build di .next' -ForegroundColor DarkGray
-            } elseif (-not $prev) {
-                Write-Host '  belum ada stamp build sebelumnya' -ForegroundColor DarkGray
-            } elseif ($prev -ne $now) {
-                Write-Host '  ada perubahan sejak build terakhir' -ForegroundColor DarkGray
-            } else {
-                $needBuild = $false
-                Write-Host ("  tidak ada perubahan (cek {0} ms) -> BUILD DILEWATI" -f $sw.ElapsedMilliseconds) -ForegroundColor Green
-            }
-
-            if ($needBuild) {
-                Write-Host '  building... (sabar, ini yang lama)' -ForegroundColor DarkGray
-                & $npm run build
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "`n[X] next build gagal. Perbaiki error di atas lalu jalankan ulang." -ForegroundColor Red
-                    return
-                }
-                # Stamp ditulis SETELAH build sukses, dan sengaja di dalam
-                # .next supaya -Clean ikut membuangnya. Sidik jarinya dihitung
-                # ulang: build sendiri bisa menyentuh file di src/ (misal
-                # .tsbuildinfo di dalamnya), jadi nilai sebelum-build bisa
-                # basi dan bikin build berikutnya jalan percuma.
-                Set-Content -Path $stampFile -Value (Get-FrontendFingerprint) -Encoding ASCII
-                Write-Host '  build selesai.' -ForegroundColor Green
-            }
-
-            # --- baru nunggu giliran -------------------------------------
-            # Frontend paling belakang di rantai (backend -> dobot -> frontend),
-            # TAPI build-nya sengaja dijalankan duluan di atas tanpa nunggu:
-            # `next build` tidak butuh service mana pun, dan dia bagian yang
-            # paling lama. Dijalankan barengan boot backend + dobot, jadi
-            # antriannya gratis -- pas build kelar, dua-duanya biasanya sudah
-            # siap dan lanjut langsung.
-            Write-Host '  nunggu giliran:' -ForegroundColor DarkGray
-            $notReady = @()
-            if (-not (Wait-Port -Port $BackendPort -Label 'backend' -TimeoutSec 180)) { $notReady += 'backend' }
-            if (-not (Wait-Port -Port $DobotPort   -Label 'dobot'   -TimeoutSec 240)) { $notReady += 'dobot' }
-
-            if ($notReady.Count -gt 0) {
-                # Sengaja tetap lanjut, bukan berhenti. Kalau dobot mati (kamera
-                # kepakai app lain, robot tidak terjangkau), kiosk yang blank
-                # jauh lebih susah didiagnosa daripada kiosk yang nyala dengan
-                # satu fitur error. Dashboard admin juga tetap kepakai penuh.
-                Write-Host ''
-                Write-Host ("  [!] {0} belum nyala sampai batas waktu." -f ($notReady -join ' & ')) -ForegroundColor Yellow
-                Write-Host '      Frontend tetap distart -- cek pane-nya, fitur yang' -ForegroundColor Yellow
-                Write-Host '      butuh service itu bakal error.' -ForegroundColor Yellow
-                Write-Host ''
-            }
-
-            Write-Host '  starting server...' -ForegroundColor DarkGray
-            & $npm run start
-        }
-
-        'booth' {
-            Set-Location $BoothDir
-            Write-Host "=== BOOTH (Vite) :$BoothPort ===" -ForegroundColor Green
+            Write-Host "=== BOOTH (Vite) :$FrontendPort ===" -ForegroundColor Magenta
             $npm = Get-ToolPath 'npm.cmd' 'Pasang Node.js dari https://nodejs.org dan pastikan folder-nya masuk PATH.'
             if (-not $npm) { return }
             if ($Dev) {
-                & $npm run dev:booth -- --host 0.0.0.0
+                & $npm run dev -w @photobooth/booth -- --host 0.0.0.0
                 return
+            }
+            if ($Clean) {
+                $dist = Join-Path $FrontendDir 'apps\booth\dist'
+                if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
             }
             & $npm run build -w @photobooth/booth
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "`n[X] booth build gagal. Perbaiki error di atas lalu jalankan ulang." -ForegroundColor Red
                 return
             }
+            Write-Host '  nunggu giliran:' -ForegroundColor DarkGray
+            $notReady = @()
+            if (-not (Wait-Port -Port $BackendPort -Label 'backend' -TimeoutSec 180)) { $notReady += 'backend' }
+            if (-not (Wait-Port -Port $DobotPort -Label 'dobot' -TimeoutSec 240)) { $notReady += 'dobot' }
+            if ($notReady.Count -gt 0) {
+                Write-Host ("  [!] {0} belum nyala sampai batas waktu; booth tetap distart." -f ($notReady -join ' & ')) -ForegroundColor Yellow
+            }
             & $npm run preview -w @photobooth/booth -- --host 0.0.0.0
         }
-
         'dobot' {
             Set-Location $DobotDir
             Write-Host "=== DOBOT (Python) :$DobotPort ===" -ForegroundColor Yellow
 
-            # Mata rantai kedua: backend -> DOBOT -> frontend.
+            # Mata rantai kedua: backend -> DOBOT -> booth.
             #
             # Bukan cuma soal urutan rapi. Dobot narik tuning robot (speed,
             # timing) dari backend saat boot lewat apply_backend_overrides().
@@ -555,7 +412,7 @@ if ($Service) {
 
 Write-Host ''
 Write-Host '  GLAMBOT PHOTO BOOTH' -ForegroundColor White
-Write-Host ("  backend :{0}   admin :{1}   booth :{2}   dobot :{3}" -f $BackendPort, $FrontendPort, $BoothPort, $DobotPort) -ForegroundColor DarkGray
+Write-Host ("  backend :{0}   booth :{1}   dobot :{2}" -f $BackendPort, $FrontendPort, $DobotPort) -ForegroundColor DarkGray
 Write-Host ''
 
 # --- 1. update kode dari main (sebelum apa pun, biar preflight & build lihat
@@ -583,19 +440,11 @@ $required = @{
     'backend\.env'               = 'config backend (copy dari backend\.env.example)'
     'dobot\.env'                 = 'config dobot (copy dari dobot\.env.example)'
     'dobot\venv\Scripts\python.exe' = 'virtualenv dobot (cd dobot; python -m venv venv; venv\Scripts\pip install -r requirements.txt)'
-    'frontend\node_modules'      = 'dependency frontend (cd frontend; npm install)'
-    '..\UI-DOBOT\node_modules'  = 'dependency booth (cd ..\UI-DOBOT; npm install)'
 }
 foreach ($rel in $required.Keys) {
     if (-not (Test-Path (Join-Path $Root $rel))) {
         $problems += "$rel tidak ada -> $($required[$rel])"
     }
-}
-
-# frontend boleh pakai .env atau .env.local, salah satu cukup
-if (-not (Test-Path (Join-Path $FrontendDir '.env.local')) -and
-    -not (Test-Path (Join-Path $FrontendDir '.env'))) {
-    $problems += 'frontend\.env.local tidak ada -> copy dari frontend\.env.example'
 }
 
 if ($problems.Count -gt 0) {
@@ -612,7 +461,6 @@ Write-Host '      semua ada.' -ForegroundColor Green
 Write-Host '[3/6] bersihin port nyangkut' -ForegroundColor Cyan
 Stop-Port -Port $BackendPort  -Label 'backend'
 Stop-Port -Port $FrontendPort -Label 'frontend'
-Stop-Port -Port $BoothPort    -Label 'booth'
 Stop-Port -Port $DobotPort    -Label 'dobot'
 
 # --- 4. cache
@@ -626,31 +474,16 @@ foreach ($d in $pycache) { Remove-Item $d.FullName -Recurse -Force -ErrorAction 
 Write-Host ("      __pycache__ dihapus ({0} folder)" -f @($pycache).Count) -ForegroundColor DarkGray
 
 # Profil browser: dibuang tiap start, jadi kiosk selalu ketemu asset terbaru
-# tanpa harus rebuild .next yang mahal itu.
+# tanpa harus rebuild booth yang mahal itu.
 if (Test-Path $ProfileDir) {
     Remove-Item $ProfileDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host '      profil browser di-reset' -ForegroundColor DarkGray
 }
 
-# .next hanya kalau diminta. Dipertahankan = `next build` bisa incremental
-# (jauh lebih cepat); dihapus = build dari nol.
-$nextDir = Join-Path $FrontendDir '.next'
-if ($Clean) {
-    if (Test-Path $nextDir) {
-        Remove-Item $nextDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host '      frontend\.next dihapus (build dari nol, sabar ya)' -ForegroundColor DarkGray
-    }
-} else {
-    Write-Host '      frontend\.next dipertahankan (build incremental; -Clean buat dari nol)' -ForegroundColor DarkGray
-}
-
 # --- 5. spawn pane
 
 Write-Host '[5/6] nyalain service' -ForegroundColor Cyan
-Write-Host '      urutan: backend -> dobot -> frontend (tiap pane nunggu gilirannya)' -ForegroundColor DarkGray
-if (-not $Dev) {
-    Write-Host '      next build jalan duluan barengan, tidak ikut antre' -ForegroundColor DarkGray
-}
+Write-Host '      urutan: backend -> dobot -> booth (tiap pane nunggu gilirannya)' -ForegroundColor DarkGray
 
 $self  = $PSCommandPath
 $flags = ''
@@ -683,49 +516,42 @@ function Get-PaneCommand {
 
 $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
 if ($wt) {
-    # backend kiri | admin kanan-atas / booth tengah / dobot bawah.
+    # backend kiri | booth kanan / dobot bawah.
     # split-pane selalu memecah pane yang lagi fokus, dan fokus pindah ke pane
-    # baru setelah split -- makanya -H yang kedua memecah frontend, bukan backend.
+    # baru setelah split.
     $wtArgs = @(
         "-w new new-tab --title backend -d `"$BackendDir`" $(Get-PaneCommand 'backend')",
-        "split-pane -V --title frontend -d `"$FrontendDir`" $(Get-PaneCommand 'frontend')",
-        "split-pane -H --title booth -d `"$BoothDir`" $(Get-PaneCommand 'booth')",
+        "split-pane -V --title booth -d `"$FrontendDir`" $(Get-PaneCommand 'frontend')",
         "split-pane -H --title dobot -d `"$DobotDir`" $(Get-PaneCommand 'dobot')"
     ) -join ' ; '
 
     Start-Process -FilePath $wt.Source -ArgumentList $wtArgs
-    Write-Host '      Windows Terminal: 3 pane (backend | frontend / dobot)' -ForegroundColor DarkGray
+    Write-Host '      Windows Terminal: 3 pane (backend | booth / dobot)' -ForegroundColor DarkGray
 } else {
     # Fallback kalau Windows Terminal tidak terpasang: 3 window biasa.
     Write-Host '      wt.exe tidak ada -> pakai 3 window terpisah' -ForegroundColor DarkYellow
-    foreach ($s in @('backend', 'frontend', 'booth', 'dobot')) {
+    foreach ($s in @('backend', 'frontend', 'dobot')) {
         Start-Process -FilePath $PSExe `
             -ArgumentList "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$self`" -Service $s$flags"
     }
 }
 
-# --- 6. tunggu frontend benar-benar melayani, lalu buka kiosk
+# --- 6. tunggu booth benar-benar melayani, lalu buka kiosk
 
 if ($NoBrowser) {
     Write-Host '[6/6] -NoBrowser: browser tidak dibuka' -ForegroundColor Cyan
-    Write-Host ("`n      buka manual: http://localhost:{0}`n" -f $BoothPort) -ForegroundColor White
+    Write-Host ("`n      buka manual: http://localhost:{0}`n" -f $FrontendPort) -ForegroundColor White
     exit 0
 }
 
-# Batas atas, bukan lama tunggu -- loop di bawah berhenti begitu frontend
-# menjawab. Kalau tidak ada perubahan, build dilewati dan ini cuma hitungan
-# detik; kalau ada, `npm run build` harus kelar dulu baru servernya nyala.
-$waitSec = if ($Dev) { 240 } elseif ($Clean) { 900 } else { 600 }
+# Batas atas, bukan lama tunggu -- loop di bawah berhenti begitu booth
+# membalas HTTP. Production build berjalan di booth pane.
+$waitSec = if ($Dev) { 240 } else { 900 }
 Write-Host ("[6/6] tunggu frontend siap (batas {0} menit)" -f [math]::Round($waitSec / 60)) -ForegroundColor Cyan
-if (-not $Dev) {
-    Write-Host '      kalau ada perubahan, next build jalan dulu - wajar kalau lama' -ForegroundColor DarkGray
-}
 
-$url   = "http://localhost:$BoothPort"
+$url   = "http://localhost:$FrontendPort"
 $ready = $false
-# Yang dicek harus response HTTP-nya, bukan cuma port kebuka. Di dev, Next baru
-# compile halaman waktu request pertama masuk (request ini sekalian pemanasan);
-# di production, port baru kebuka setelah build selesai.
+# Yang dicek harus response HTTP-nya, bukan cuma port kebuka.
 $deadline = (Get-Date).AddSeconds($waitSec)
 Write-Host '      ' -NoNewline
 while ((Get-Date) -lt $deadline) {
@@ -741,7 +567,7 @@ while ((Get-Date) -lt $deadline) {
 
 if (-not $ready) {
     Write-Host ''
-    Write-Host ("      [!] frontend belum merespons dalam {0} detik. Cek pane 'frontend'." -f $waitSec) -ForegroundColor Yellow
+    Write-Host ("      [!] booth belum merespons dalam {0} detik. Cek pane 'booth'." -f $waitSec) -ForegroundColor Yellow
     exit 1
 }
 Write-Host ' siap.' -ForegroundColor Green

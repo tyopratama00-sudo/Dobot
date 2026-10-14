@@ -199,7 +199,8 @@ VALUES
   ('GLAMBOT10', '10% discount on your order',         'percent', 10,     50000, 100, 0, 1),
   ('FREESHIP',  'Flat Rp15.000 discount',             'fixed',   15000,  0,     50,  0, 1),
   ('GLAMSHINE', '50% off — special Glambot moment',   'percent', 50,     0,     100, 0, 1),
-  ('GLAMHERO',  'Gratis 1 sesi penuh — Glambot Hero', 'percent', 100,    0,     50,  0, 1)
+  ('GLAMHERO',  'Gratis 1 sesi penuh — Glambot Hero', 'percent', 100,    0,     50,  0, 1),
+  ('FREE FOTO', 'Gratis cetak foto',                  'percent', 100,    0,   1000,  0, 1)
 -- Insert-only: lihat catatan pada seed packages. DO NOTHING agar voucher default
 -- yang diedit admin tidak ke-reset tiap server boot.
 ON CONFLICT (code) DO NOTHING;
