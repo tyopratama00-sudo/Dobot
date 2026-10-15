@@ -109,6 +109,10 @@ export interface BoothConfig {
   timingScale: number;
   devTools: boolean;
   mockPayment: boolean;
+  /** Admin toggle for the "FREE FOTO" shortcut chip on the pay screen. */
+  voucherChip?: boolean;
+  /** Admin choice for free sessions: skip print and deliver files by QR only. */
+  freeDigitalOnly?: boolean;
   environment: string;
 }
 

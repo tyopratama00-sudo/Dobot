@@ -3,11 +3,11 @@ import { applyDrag, applyPinch, applyWheel, cssTransform, defaultEdit, FILTERS, 
 import { computeFrameLayout } from '@photobooth/shared';
 import { currentTemplate, get, useBooth, useFlatPhotos } from '../store';
 import { Frame } from '../components/Frame';
-import { Icon, Pic } from '../components/basics';
+import { Icon, Pic, Steps } from '../components/basics';
 import { back, editDone, editOf, editOp, selectSlot, setEdit } from '../flow';
 import type { IconName } from '@photobooth/ui';
 
-const FRAME_H = 740;
+const FRAME_H = 640;
 
 /**
  * prototype V.edit + touch gestures:
@@ -156,16 +156,21 @@ export function Edit() {
   );
 
   return (
-    <div className="scr en">
-      <div className="top">
+    <div className="scr en booth-theme" style={{ paddingTop: 40, paddingBottom: 56 }}>
+      <div className="top" style={{ marginBottom: 0 }}>
         <button className={`btn sm ${busy === 'back' ? 'wait' : ''}`} onClick={back}>
           <Icon n="back" z={30} />
           Foto
         </button>
-        <div className="chip b" data-testid="edit-chip">
-          Sedang mengedit foto {slot + 1} dari {n}
-        </div>
+        <Steps cur={2} />
       </div>
+      <header className="booth-hero sm">
+        <span className="free-eyebrow"><span>✦</span> SENTUHAN AKHIR <span>✦</span></span>
+        <h1>Percantik <em>fotomu</em></h1>
+        <p className="p">
+          <span className="chip b" data-testid="edit-chip">Sedang mengedit foto {slot + 1} dari {n}</span>
+        </p>
+      </header>
       <div className="row" style={{ justifyContent: 'center', alignItems: 'center', gap: 64 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }} ref={frameRef}>
           <Frame t={t} h={FRAME_H} mode={1} slots={slots} edits={edits} activeSlot={slot} label={t.label || label} hiRes onSlotPointerDown={onDown} onSlotWheel={onWheel} />
@@ -203,6 +208,7 @@ export function Edit() {
           </button>
         </div>
       </div>
+      <footer className="free-footer"><span>ROBOT PHOTOBOOTH</span><i /> {t.name}</footer>
     </div>
   );
 }

@@ -10,10 +10,10 @@ import { voice } from '../voice';
  *  - safe zones: idle targets avoid buttons / photos / the editor frame
  *  - taps on the robot that land over an interactive element are forwarded to it,
  *    so the mascot can never block the customer
- *  - screens where the robot must stay away (QR, payment, print) simply hide it
+ *  - capture/QR/print screens keep robot out of camera, QR, and output areas
  */
 
-export const FLY: BoothScreen[] = ['ready', 'session', 'review', 'tpl', 'pick', 'edit', 'final'];
+export const FLY: BoothScreen[] = ['ready', 'session', 'review', 'tpl', 'pick', 'edit', 'final', 'pay'];
 const POOL = ['wave', 'grin', 'peace', 'cheer', 'thumbs', 'heart', 'free', 'hop', 'cool'];
 const LINES: Partial<Record<BoothScreen, string>> = {
   ready: 'Siap difoto?',
@@ -23,6 +23,7 @@ const LINES: Partial<Record<BoothScreen, string>> = {
   pick: 'Pilih yang kamu suka!',
   edit: 'Coba cubit fotonya!',
   final: 'Tinggal cetak!',
+  pay: 'Pilih paketmu!',
 };
 type Fx = 'heart' | 'star' | null | '' | undefined;
 const RESP: { pose: string; an: string; t: () => string; fx?: Fx }[] = [
@@ -34,7 +35,7 @@ const RESP: { pose: string; an: string; t: () => string; fx?: Fx }[] = [
   { pose: 'peace', an: 'wob', t: () => 'Cekrek! Peace!' },
 ];
 
-const INTERACTIVE = 'button,.btn,.th,[data-tap],.slot,input';
+const INTERACTIVE = 'button,.btn,.th,[data-tap],.slot,input,.pay-qr,.pay-method,.pay-wallets,.voucher-panel,.pay-select-footer';
 
 class FloatingRobot {
   screen: BoothScreen = 'welcome';
@@ -86,12 +87,14 @@ class FloatingRobot {
   /** prototype syncRob(): called whenever the screen or the session phase changes */
   sync(screen: BoothScreen, sessionPose?: string) {
     const F = this.F;
+    const previous = this.screen;
     this.screen = screen;
     if (sessionPose) this.sessionPose = sessionPose;
     F.on = FLY.includes(screen);
     if (!this.rob) return;
     this.rob.style.display = F.on ? 'block' : 'none';
     if (!F.on) return;
+    if (screen === 'pay' && previous !== 'pay') this.say('Pilih paketmu!', 3200);
     const sz = screen == 'ready' || screen == 'session' ? 300 : 220;
     this.setPose(screen == 'ready' ? 'wave' : screen == 'session' ? this.sessionPose : F.pose && F.pose != 'cam' ? F.pose : 'grin', sz);
     const eg = screen == 'session' || screen == 'ready';

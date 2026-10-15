@@ -296,7 +296,7 @@ let payTimer: ReturnType<typeof setTimeout> | undefined;
 export async function startSession() {
   const s = get();
   if (s.entering || s.session) return;
-  set({ entering: true, qty: 1, payError: null, payBusy: true });
+  set({ entering: true, qty: s.config?.freeDigitalOnly ? 0 : 1, payError: null, payBusy: true });
   voice('welcome_start');
   const t = tok;
   const anim = new Promise((r) => setTimeout(r, 1900));
@@ -341,7 +341,14 @@ async function requestPayment(q: number) {
 export function setQty(delta: number) {
   const s = get();
   const max = s.config?.pricing.maxQuantity ?? 10;
-  const q = clampQuantity(s.qty + delta, { ...s.config!.pricing, maxQuantity: max });
+  pickQty(clampQuantity(s.qty + delta, { ...s.config!.pricing, maxQuantity: max }));
+}
+
+/** qty 0 = digital only (no print). */
+export const setDigital = (on: boolean) => pickQty(on ? 0 : 1);
+
+function pickQty(q: number) {
+  const s = get();
   if (q === s.qty) return;
   set({ qty: q, payError: null, payBusy: true });
   clearTimeout(payTimer);
@@ -370,7 +377,7 @@ export async function applyFreeVoucher(code: string): Promise<string | null> {
   if (get().busy || get().session?.status === 'PAYMENT_SUCCESS') return 'Pembayaran sudah selesai.';
   set({ busy: 'voucher', payBusy: true, payError: null });
   try {
-    applySnapshot(await api.applyFreeVoucher(code));
+    applySnapshot(await api.applyFreeVoucher(code, get().qty));
     return null;
   } catch (e) {
     return voucherErrorMessage(e);
@@ -759,7 +766,7 @@ export function editDone() {
 
 export function confirmPrint() {
   voice('final_ok');
-  robot.rbNav('Siap cetak!', 'cheer', () => void guard('confirm', () => send({ type: 'confirm' })));
+  robot.rbNav(get().session?.quantity ? 'Siap cetak!' : 'Siap simpan!', 'cheer', () => void guard('confirm', () => send({ type: 'confirm' })));
 }
 
 export function finish() {
@@ -815,6 +822,11 @@ export function resetToWelcome() {
     readyCd: get().config?.session.readySeconds ?? 5,
   });
   void refreshHealth();
+  // Pick up admin changes (free mode, prices, voucher chip) for the next session.
+  void api
+    .config()
+    .then((config) => !get().session && set({ config: { ...config, timingScale: get().config?.timingScale ?? config.timingScale } }))
+    .catch(() => undefined);
 }
 
 export function closeLightbox() {

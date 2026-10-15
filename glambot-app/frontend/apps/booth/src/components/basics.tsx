@@ -26,6 +26,31 @@ export function PosedRobot({ pose, s = 250 }: { pose: string; s?: number }) {
   return <Svg html={html} />;
 }
 
+const STEPS = ['Bayar', 'Foto', 'Edit', 'Simpan'];
+/** Journey indicator shown top-right on every customer page. */
+export function Steps({ cur }: { cur: number }) {
+  return (
+    <div className="pay-steps" aria-label={`Langkah ${cur + 1}: ${STEPS[cur]}`}>
+      {STEPS.map((s, i) => (
+        <span key={s} className={i === cur ? 'cur' : ''}>
+          <i />
+          {s}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Robot on the PayFree halo (dashed ring + dots), for centred status pages. */
+export function HaloRobot({ m, s }: { m: RobotMood; s: number }) {
+  return (
+    <div className="booth-art" style={{ width: s * 1.3, height: s * 1.15 }}>
+      <div className="free-halo" aria-hidden><i /><i /><i /></div>
+      <Robot m={m} s={s} />
+    </div>
+  );
+}
+
 /** prototype bub(text, small) */
 export function Bubble({ children, small, style }: { children: ReactNode; small?: ReactNode; style?: CSSProperties }) {
   return (

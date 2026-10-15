@@ -14,7 +14,7 @@ export function Ready() {
   const pct = total > 1 ? ((total - cd) / (total - 1)) * 100 : 100;
   const ratio = useBooth(slotRatio);
   return (
-    <div className="scr en">
+    <div className="scr en booth-theme">
       <div className="top">
         <div className="chip b">Angle {p2(angle + 1)} segera dimulai</div>
         <div className="chip y" data-testid="ready-cd">
@@ -64,7 +64,7 @@ export function Session() {
   const ratio = useBooth(slotRatio);
   const need = useBooth((s) => currentTemplate(s).photoCount);
   return (
-    <div className="scr en">
+    <div className="scr en booth-theme">
       <div className={`top ${retake ? 'retake-top' : ''}`}>
         <div className={`chip ${retake ? 'retake-chip' : 'b'}`} data-testid="session-angle">
           {retake ? '♡ COBA LAGI · ' : ''}ANGLE {p2(a + 1)} / {p2(angles)}
