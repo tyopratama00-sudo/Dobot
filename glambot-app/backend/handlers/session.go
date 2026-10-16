@@ -83,6 +83,10 @@ func CreateSession(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid print count")
 		return
 	}
+	if cfg, err := loadTimerConfig(); err == nil && printCount > cfg.Session["maxQuantity"] {
+		respondError(w, http.StatusBadRequest, "Invalid print count")
+		return
+	}
 	// Paket gratis: cetak dikunci 1 lembar supaya tidak bisa diakali lewat API.
 	if pkgInfo.Price == 0 && printUnitPrice == 0 {
 		printCount = 1

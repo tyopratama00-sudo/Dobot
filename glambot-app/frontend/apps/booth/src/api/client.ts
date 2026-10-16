@@ -135,6 +135,15 @@ interface GoPackage { id: number; code: string; price: number; duration_secs: nu
 interface GoSession { id: string; final_price: number; status: string; expires_at: string }
 interface GoTx { midtrans_order_id: string; status: string; qris_raw_string?: string; qris_url?: string; paid_at?: string }
 interface GoPhoto { id: string; url?: string; file_path: string; created_at: string }
+/** GET /api/config (backend/handlers/config.go timerConfig). */
+interface AppConfig {
+  voucherChipEnabled?: boolean;
+  voucherChipCode?: string;
+  freeDigitalOnly?: boolean;
+  timeouts?: Partial<BoothConfig['timeouts']>;
+  session?: { readySeconds?: number; retakeLimit?: number; maxQuantity?: number };
+  display?: { brandLabel?: string; welcomeChip?: string };
+}
 interface GoFrame {
   id: string;
   name: string;
@@ -197,6 +206,8 @@ class Api {
   private pkg: GoPackage | null = null;
   private templates: PhotoTemplate[] = [];
   private packageDurationSecs = 600;
+  /** Admin-set per-session values (GET /api/config), copied into each new session plan. */
+  private plan = { readySeconds: DEFAULT_SETTINGS.session.readySeconds, retakeLimit: 2 };
   private listeners = new Set<(s: SessionSnapshot) => void>();
   private poll: ReturnType<typeof setInterval> | undefined;
   private paySeq = 0;
@@ -249,7 +260,7 @@ class Api {
       go<GoPackage[]>('GET', '/api/package'),
       go<GoFrame[]>('GET', '/api/frames'),
       go<{ test_payment_enabled: boolean }>('GET', '/api/payment/config'),
-      go<{ voucherChipEnabled?: boolean; voucherChipCode?: string; freeDigitalOnly?: boolean; timeouts?: Partial<BoothConfig['timeouts']> }>('GET', '/api/config').catch(() => ({ voucherChipEnabled: true, voucherChipCode: 'FREE FOTO', freeDigitalOnly: false, timeouts: {} })),
+      go<AppConfig>('GET', '/api/config').catch((): AppConfig => ({ voucherChipEnabled: true, voucherChipCode: 'FREE FOTO', freeDigitalOnly: false })),
     ]);
     // Free mode zeroes every price, so a 0 print price must still pick the print package.
     const priced = pkgs.filter((p) => p.print_unit_price > 0 || p.price + p.print_unit_price === 0);
@@ -260,15 +271,17 @@ class Api {
     this.templates = fromAdmin.length ? fromAdmin : DEFAULT_TEMPLATES;
     const d = DEFAULT_SETTINGS;
     const { digicamUrl: _a, gphoto2Bin: _b, captureCommand: _c, previewUrl: _d, ...camera } = d.camera;
+    const s = appConfig.session ?? {};
+    this.plan = { readySeconds: s.readySeconds ?? d.session.readySeconds, retakeLimit: s.retakeLimit ?? 2 };
     return {
-      pricing: { ...d.pricing, firstPrint: this.pkg.price + this.pkg.print_unit_price, additionalPrint: this.pkg.print_unit_price },
-      session: { ...d.session, shotsPerAngle: 1, retakeLimit: 2 },
+      pricing: { ...d.pricing, firstPrint: this.pkg.price + this.pkg.print_unit_price, additionalPrint: this.pkg.print_unit_price, maxQuantity: s.maxQuantity ?? d.pricing.maxQuantity },
+      session: { ...d.session, shotsPerAngle: 1, ...this.plan },
       timeouts: { ...d.timeouts, ...appConfig.timeouts },
       // Go returns the Canon live view already mirrored.
       camera: { ...camera, mirrorPreview: false, mode: 'server', liveViewUrl: '/api/robot/liveview' },
       templates: this.templates,
       angles: DEFAULT_ANGLES.map((a) => ({ id: a.id, name: a.name })),
-      branding: d.branding,
+      branding: { label: appConfig.display?.brandLabel || d.branding.label, welcomeChip: appConfig.display?.welcomeChip || d.branding.welcomeChip },
       timingScale: 1,
       devTools: false,
       mockPayment: paymentConfig.test_payment_enabled,
@@ -315,7 +328,7 @@ class Api {
       createdAt: now,
       paidAt: null,
       expiresAt: null,
-      plan: { angles: 10, shotsPerAngle: 1, retakeLimit: 2, countdownSeconds: 3, readySeconds: DEFAULT_SETTINGS.session.readySeconds },
+      plan: { angles: 10, shotsPerAngle: 1, countdownSeconds: 3, ...this.plan },
       payment: null,
       photos: [],
       slots: [],

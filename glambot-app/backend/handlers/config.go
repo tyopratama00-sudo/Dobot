@@ -44,21 +44,50 @@ var timerFields = []timerField{
 	{"errorResetSeconds", "error_reset_seconds", 90, 10, 3600},
 }
 
+// Sesi booth: default = DEFAULT_SETTINGS (session.readySeconds/retakeLimit,
+// pricing.maxQuantity). readySeconds min 1: 0 bikin hitung mundur NaN.
+var sessionFields = []timerField{
+	{"readySeconds", "ready_seconds", 5, 1, 30},
+	{"retakeLimit", "retake_limit", 2, 0, 20},
+	{"maxQuantity", "max_quantity", 10, 1, 50},
+}
+
+type textField struct {
+	JSON, Key, Def string
+	Max            int
+}
+
+// Tampilan booth: default = DEFAULT_SETTINGS.branding.
+var displayFields = []textField{
+	{"brandLabel", "brand_label", "ROBOT PHOTOBOOTH", 40},
+	{"welcomeChip", "welcome_chip", "Studio foto otomatis · 10 angle", 80},
+}
+
 type timerConfig struct {
-	Timeouts           map[string]int `json:"timeouts"`
-	VoucherChipEnabled bool           `json:"voucherChipEnabled"`
-	VoucherChipCode    string         `json:"voucherChipCode"`
-	FreeMode           bool           `json:"freeMode"`
-	FreeDigitalOnly    bool           `json:"freeDigitalOnly"`
+	Timeouts           map[string]int    `json:"timeouts"`
+	Session            map[string]int    `json:"session"`
+	Display            map[string]string `json:"display"`
+	VoucherChipEnabled bool              `json:"voucherChipEnabled"`
+	VoucherChipCode    string            `json:"voucherChipCode"`
+	FreeMode           bool              `json:"freeMode"`
+	FreeDigitalOnly    bool              `json:"freeDigitalOnly"`
 }
 
 // loadTimerConfig membaca timer dari app_settings, mengisi default untuk key
 // yang belum ada / nilainya tidak valid.
 func loadTimerConfig() (timerConfig, error) {
-	cfg := timerConfig{Timeouts: map[string]int{}, VoucherChipEnabled: true, VoucherChipCode: defaultChipCode}
+	cfg := timerConfig{Timeouts: map[string]int{}, Session: map[string]int{}, Display: map[string]string{}, VoucherChipEnabled: true, VoucherChipCode: defaultChipCode}
 	keys := []string{keyVoucherChip, keyVoucherChipCode, keyFreeModeBackup, keyFreeDigitalOnly}
 	for _, f := range timerFields {
 		cfg.Timeouts[f.JSON] = f.Def
+		keys = append(keys, f.Key)
+	}
+	for _, f := range sessionFields {
+		cfg.Session[f.JSON] = f.Def
+		keys = append(keys, f.Key)
+	}
+	for _, f := range displayFields {
+		cfg.Display[f.JSON] = f.Def
 		keys = append(keys, f.Key)
 	}
 
@@ -77,6 +106,16 @@ func loadTimerConfig() (timerConfig, error) {
 	for _, f := range timerFields {
 		if n, err := strconv.Atoi(values[f.Key]); err == nil && n >= f.Min && n <= f.Max {
 			cfg.Timeouts[f.JSON] = n
+		}
+	}
+	for _, f := range sessionFields {
+		if n, err := strconv.Atoi(values[f.Key]); err == nil && n >= f.Min && n <= f.Max {
+			cfg.Session[f.JSON] = n
+		}
+	}
+	for _, f := range displayFields {
+		if v := values[f.Key]; v != "" && len([]rune(v)) <= f.Max {
+			cfg.Display[f.JSON] = v
 		}
 	}
 	return cfg, nil
@@ -148,11 +187,26 @@ func readAppSettings(keys ...string) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// DELETE /api/admin/settings — hapus override timer, kembali ke default hardcode.
+// DELETE /api/admin/settings?group=timeouts|session|display — hapus override
+// satu grup, kembali ke default hardcode. Tanpa group = timeouts (kompatibel).
 func AdminResetSettings(w http.ResponseWriter, r *http.Request) {
-	keys := make([]string, len(timerFields))
-	for i, f := range timerFields {
-		keys[i] = f.Key
+	var keys []string
+	switch r.URL.Query().Get("group") {
+	case "", "timeouts":
+		for _, f := range timerFields {
+			keys = append(keys, f.Key)
+		}
+	case "session":
+		for _, f := range sessionFields {
+			keys = append(keys, f.Key)
+		}
+	case "display":
+		for _, f := range displayFields {
+			keys = append(keys, f.Key)
+		}
+	default:
+		respondError(w, http.StatusBadRequest, "Grup tidak dikenal")
+		return
 	}
 	if err := deleteAppSettings(keys...); err != nil {
 		respondInternal(w, "reset timers", err)
@@ -188,32 +242,52 @@ func upsertAppSettings(updates map[string]string) error {
 
 func AdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Timeouts           map[string]int `json:"timeouts"`
-		VoucherChipEnabled *bool          `json:"voucherChipEnabled"`
-		VoucherChipCode    *string        `json:"voucherChipCode"`
-		FreeDigitalOnly    *bool          `json:"freeDigitalOnly"`
+		Timeouts           map[string]int    `json:"timeouts"`
+		Session            map[string]int    `json:"session"`
+		Display            map[string]string `json:"display"`
+		VoucherChipEnabled *bool             `json:"voucherChipEnabled"`
+		VoucherChipCode    *string           `json:"voucherChipCode"`
+		FreeDigitalOnly    *bool             `json:"freeDigitalOnly"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "Body tidak valid")
 		return
 	}
-	if len(body.Timeouts) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil {
+	if len(body.Timeouts) == 0 && len(body.Session) == 0 && len(body.Display) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil {
 		respondError(w, http.StatusBadRequest, "Tidak ada perubahan")
 		return
 	}
 
 	strUpdates := map[string]string{}
-	for k, v := range body.Timeouts {
-		i := slices.IndexFunc(timerFields, func(f timerField) bool { return f.JSON == k })
+	for _, g := range []struct {
+		fields []timerField
+		vals   map[string]int
+	}{{timerFields, body.Timeouts}, {sessionFields, body.Session}} {
+		for k, v := range g.vals {
+			i := slices.IndexFunc(g.fields, func(f timerField) bool { return f.JSON == k })
+			if i < 0 {
+				respondError(w, http.StatusBadRequest, "Pengaturan tidak dikenal: "+k)
+				return
+			}
+			if f := g.fields[i]; v < f.Min || v > f.Max {
+				respondError(w, http.StatusBadRequest, fmt.Sprintf("%s harus antara %d–%d", k, f.Min, f.Max))
+				return
+			}
+			strUpdates[g.fields[i].Key] = strconv.Itoa(v)
+		}
+	}
+	for k, v := range body.Display {
+		i := slices.IndexFunc(displayFields, func(f textField) bool { return f.JSON == k })
 		if i < 0 {
-			respondError(w, http.StatusBadRequest, "Timer tidak dikenal: "+k)
+			respondError(w, http.StatusBadRequest, "Pengaturan tidak dikenal: "+k)
 			return
 		}
-		if f := timerFields[i]; v < f.Min || v > f.Max {
-			respondError(w, http.StatusBadRequest, fmt.Sprintf("%s harus antara %d–%d detik", k, f.Min, f.Max))
+		v = strings.TrimSpace(v)
+		if f := displayFields[i]; v == "" || len([]rune(v)) > f.Max {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("%s wajib diisi, maks %d karakter", k, f.Max))
 			return
 		}
-		strUpdates[timerFields[i].Key] = strconv.Itoa(v)
+		strUpdates[displayFields[i].Key] = v
 	}
 	if body.VoucherChipEnabled != nil {
 		strUpdates[keyVoucherChip] = strconv.Itoa(boolToInt(*body.VoucherChipEnabled))

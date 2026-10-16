@@ -2,9 +2,19 @@ import { useEffect, useState } from 'react';
 import { del, get, patch } from '../api';
 import { toast, usePoll } from '../ui';
 
-type Field = [key: string, label: string, min: number, max: number, step?: number, unit?: string];
+// text = true: min/max are character counts, value saved as string.
+type Field = [key: string, label: string, min: number, max: number, step?: number, unit?: string, text?: boolean];
 
-// Ranges mirror backend validation (config.go timerFields, robot_settings.go robotRanges).
+// Ranges mirror backend validation (config.go timerFields/sessionFields/displayFields, robot_settings.go robotRanges).
+const SESSION: Field[] = [
+  ['readySeconds', 'Hitung mundur sebelum foto', 1, 30, 1, 'detik'],
+  ['retakeLimit', 'Batas foto ulang per sesi', 0, 20, 1, 'kali'],
+  ['maxQuantity', 'Maks jumlah cetak', 1, 50, 1, 'lembar'],
+];
+const DISPLAY: Field[] = [
+  ['brandLabel', 'Label di frame', 1, 40, undefined, undefined, true],
+  ['welcomeChip', 'Teks chip layar awal', 1, 80, undefined, undefined, true],
+];
 const TIMERS: Field[] = [
   ['paymentSeconds', 'Halaman bayar (QRIS)', 30, 3600, 1, 'detik'],
   ['selectionSeconds', 'Review foto', 15, 3600, 1, 'detik'],
@@ -42,6 +52,20 @@ export function Settings() {
         fields={TIMERS}
       />
       <Section
+        title="Sesi foto"
+        hint="Berlaku untuk sesi baru setelah booth kembali ke layar awal."
+        path="/api/admin/settings"
+        nest="session"
+        fields={SESSION}
+      />
+      <Section
+        title="Tampilan booth"
+        hint="Angka “10 angle” di chip otomatis disesuaikan. Berlaku saat booth kembali ke layar awal."
+        path="/api/admin/settings"
+        nest="display"
+        fields={DISPLAY}
+      />
+      <Section
         title="Robot"
         hint="Langsung dikirim ke service dobot (tanpa restart). Turunkan kecepatan kalau gerak robot terlalu kasar."
         path="/api/admin/robot-settings"
@@ -53,20 +77,22 @@ export function Settings() {
 
 function Section({ title, hint, path, nest, fields }: { title: string; hint: string; path: string; nest?: string; fields: Field[] }) {
   const [raw, reload, err] = usePoll<Record<string, any>>(() => get(path));
-  const data: Record<string, number> | null = raw ? (nest ? raw[nest] : raw) : null;
+  const data: Record<string, number | string> | null = raw ? (nest ? raw[nest] : raw) : null;
   const [v, setV] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const fill = (d: Record<string, number>) => setV(Object.fromEntries(fields.map(([k]) => [k, String(d[k] ?? '')])));
+  const fill = (d: Record<string, number | string>) => setV(Object.fromEntries(fields.map(([k]) => [k, String(d[k] ?? '')])));
   useEffect(() => {
     if (data) fill(data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw]);
 
-  const bad = fields.filter(([k, , min, max]) => {
+  const val = ([k, , , , , , text]: Field) => (text ? v[k]?.trim() : Number(v[k]));
+  const bad = fields.filter(([k, , min, max, , , text]) => {
+    if (text) return (v[k]?.trim().length ?? 0) < min || (v[k]?.trim().length ?? 0) > max;
     const n = Number(v[k]);
     return v[k] === '' || Number.isNaN(n) || n < min || n > max;
   });
-  const changed = data ? fields.filter(([k]) => Number(v[k]) !== data[k]) : [];
+  const changed = data ? fields.filter((f) => val(f) !== data[f[0]]) : [];
 
   const send = async (fn: () => Promise<unknown>, ok: string) => {
     setSaving(true);
@@ -81,10 +107,11 @@ function Section({ title, hint, path, nest, fields }: { title: string; hint: str
     }
   };
   const save = () => {
-    const body = Object.fromEntries(changed.map(([k]) => [k, Number(v[k])]));
+    const body = Object.fromEntries(changed.map((f) => [f[0], val(f)]));
     return send(() => patch(path, nest ? { [nest]: body } : body), `${title} disimpan`);
   };
-  const reset = () => confirm(`Kembalikan semua ${title.toLowerCase()} ke nilai bawaan?`) && void send(() => del(path), `${title} kembali ke bawaan`);
+  const reset = () =>
+    confirm(`Kembalikan semua ${title.toLowerCase()} ke nilai bawaan?`) && void send(() => del(nest ? `${path}?group=${nest}` : path), `${title} kembali ke bawaan`);
 
   return (
     <div className="card">
@@ -92,22 +119,21 @@ function Section({ title, hint, path, nest, fields }: { title: string; hint: str
       <p className="mu small">{hint}</p>
       {err ? <div className="chip err">{err}</div> : null}
       <div className="form">
-        {fields.map(([k, label, min, max, step, unit]) => (
+        {fields.map(([k, label, min, max, step, unit, text]) => (
           <label key={k} className="f">
             {label} {unit ? `(${unit})` : ''}
             <input
-              type="number"
-              min={min}
-              max={max}
+              type={text ? 'text' : 'number'}
+              min={text ? undefined : min}
+              max={text ? undefined : max}
+              maxLength={text ? max : undefined}
               step={step}
               value={v[k] ?? ''}
               onChange={(e) => setV((o) => ({ ...o, [k]: e.target.value }))}
               aria-invalid={bad.some(([b]) => b === k)}
               style={bad.some(([b]) => b === k) ? { borderColor: 'var(--er)' } : undefined}
             />
-            <span className="small">
-              {min}–{max}
-            </span>
+            <span className="small">{text ? `maks ${max} karakter` : `${min}–${max}`}</span>
           </label>
         ))}
       </div>
