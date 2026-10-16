@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: API },
       '/media': { target: API },
+      '/storage': { target: API },
       '/g/': { target: API },
     },
   },

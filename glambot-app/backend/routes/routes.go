@@ -52,6 +52,11 @@ func Setup(storagePath string) http.Handler {
 		// Robot runtime tuning (speed/timing) — dibaca service dobot saat start.
 		r.Get("/robot-settings", handlers.GetRobotSettings)
 
+		// Audio booth: daftar upload admin + audio bawaan (untuk pratinjau admin).
+		r.Get("/audio", handlers.GetUploadedAudio)
+		r.Get("/audio/scripts", handlers.GetAudioPreviewScripts)
+		r.Get("/audio/default/{file}", handlers.GetDefaultAudio)
+
 		// ── Packages ────────────────────────────────────────────────────────
 		r.Get("/package", handlers.GetPackages)
 
@@ -149,11 +154,13 @@ func Setup(storagePath string) http.Handler {
 				// get-photos/done). GET baca, PATCH ubah.
 				r.Get("/settings", handlers.AdminGetSettings)
 				r.Patch("/settings", handlers.AdminUpdateSettings)
+				r.Delete("/settings", handlers.AdminResetSettings)
 
 				// Settings — tuning robot (speed/akselerasi + sequence/face-tracking
 				// timing) yang diteruskan ke service dobot.
 				r.Get("/robot-settings", handlers.GetRobotSettings)
 				r.Patch("/robot-settings", handlers.AdminUpdateRobotSettings)
+				r.Delete("/robot-settings", handlers.AdminResetRobotSettings)
 
 				// Packages
 				r.Get("/packages", handlers.AdminListPackages)
@@ -162,6 +169,7 @@ func Setup(storagePath string) http.Handler {
 				r.Get("/packages/{id}", handlers.AdminGetPackage)
 				r.Patch("/packages/{id}", handlers.AdminUpdatePackage)
 				r.Delete("/packages/{id}", handlers.AdminDeletePackage)
+				r.Post("/free-mode", handlers.AdminSetFreeMode)
 
 				// Frames
 				r.Get("/frames", handlers.AdminListFrames)
@@ -180,11 +188,25 @@ func Setup(storagePath string) http.Handler {
 				r.Patch("/vouchers/{id}", handlers.AdminUpdateVoucher)
 				r.Delete("/vouchers/{id}", handlers.AdminDeleteVoucher)
 
+				// Audio booth: master script + file upload (storage/audio/booth/<id>.mp3)
+				r.Get("/audio", handlers.AdminListAudio)
+				r.Post("/audio", handlers.AdminCreateAudio)
+				r.Patch("/audio/{id}", handlers.AdminUpdateAudio)
+				r.Delete("/audio/{id}", handlers.AdminDeleteAudio)
+				r.Post("/audio/{id}/file", handlers.AdminUploadAudio)
+				r.Delete("/audio/{id}/file", handlers.AdminDetachAudio)
+
 				// Transactions
 				r.Get("/transactions", handlers.AdminListTransactions)
 				r.Get("/transactions/stats", handlers.AdminTransactionStats)
 				r.Get("/transactions/export", handlers.AdminExportTransactions)
 				r.Get("/transactions/{id}", handlers.AdminGetTransaction)
+
+				// Sessions (riwayat + cetak ulang) & akun
+				r.Get("/sessions", handlers.AdminListSessions)
+				r.Get("/sessions/{id}", handlers.AdminGetSession)
+				r.Post("/sessions/{id}/reprint", handlers.AdminReprintSession)
+				r.Post("/password", handlers.AdminChangePassword)
 			})
 		})
 

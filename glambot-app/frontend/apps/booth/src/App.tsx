@@ -5,6 +5,7 @@ import { boot, onIdleTimeout } from './flow';
 import { robot } from './robot/floating';
 import { Welcome } from './screens/Welcome';
 import { Pay } from './screens/Pay';
+import { PayFree } from './screens/PayFree';
 import { Ready, Session, sessionPose } from './screens/Capture';
 import { Lightbox, Review } from './screens/Review';
 import { Pick, Tpl } from './screens/Select';
@@ -14,10 +15,11 @@ import { DevBar, ErrorScreen, Maintenance, Notice, ReconnectOverlay } from './sc
 import { Robot } from './components/basics';
 import { hush, voice, voiceOnScreen } from './voice';
 import { api } from './api/client';
+import { timeoutWarningText } from './timeout-notification';
 
 const SCREEN_VOICE: Partial<Record<BoothScreen | 'maintenance', string[]>> = {
   maintenance: ['welcome_maint'],
-  pay: ['pay_qty', 'pay_show'],
+  pay: ['pay_mode', 'pay_qty'],
   ready: ['countdown'],
   review: ['review_show'],
   tpl: ['tpl_type'],
@@ -39,10 +41,15 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
   const expired = useBooth((s) => s.session?.payment?.status === 'EXPIRED');
   const online = useBooth((s) => s.online);
   const idle = useBooth((s) => s.timer?.mode === 'limit' && s.timer.left <= (s.config?.timeouts.warningSeconds ?? 15));
+  const free = useBooth(isFree);
   const last = useRef('');
   useEffect(() => {
     const changed = screen !== last.current;
     last.current = screen;
+    if (free && screen === 'pay') {
+      if (changed) voice('pay_free');
+      return;
+    }
     if (status === 'PAYMENT_SUCCESS') voice('pay_ok');
     else if (status === 'PAYMENT_FAILED') voice(expired ? 'pay_qr_expired' : 'pay_retry');
     else if (status === 'PRINT_SUCCESS') voice('print_done');
@@ -91,7 +98,7 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
     if (!online) voice('err_reconnect');
   }, [online]);
   useEffect(() => {
-    if (idle && screen === 'pay') voice('pay_wait');
+    if (idle && screen === 'pay') !free && voice('pay_wait');
     else if (idle && screen === 'edit') voice('edit_warn');
     else if (idle && ['review', 'tpl', 'pick', 'final'].includes(screen)) voice('idle_warn');
   }, [idle, screen]);
@@ -126,6 +133,9 @@ function FloatingRobotHost() {
   );
 }
 
+/** Admin Free Mode zeroes package prices: booth shows the free pay page. */
+const isFree = (s: BoothState) => s.config?.pricing.firstPrint === 0;
+
 const SCREENS: Record<BoothScreen, () => JSX.Element> = {
   welcome: Welcome,
   pay: Pay,
@@ -150,6 +160,7 @@ function useTimer() {
     let lastScreen = '';
     const t = setInterval(() => {
       const s = get();
+      if (s.screenPreview) return;
       const cfg = s.config?.timeouts;
       if (!cfg) return;
       const scr = currentScreen(s);
@@ -200,12 +211,35 @@ const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, 
 function Timer() {
   const timer = useBooth((s) => s.timer);
   const warn = useBooth((s) => s.config?.timeouts.warningSeconds ?? 15);
+  const screen = useBooth((s) => currentScreen(s));
+  const [banner, setBanner] = useState<string | null>(null);
+  const warned = useRef('');
+  const warning = timeoutWarningText(timer?.mode ?? '', timer?.left ?? 0, warn);
+  const isWarning = warning !== null;
+  useEffect(() => {
+    if (!isWarning || screen === 'ready' || screen === 'session') {
+      if (!isWarning) {
+        warned.current = '';
+        setBanner(null);
+      }
+      return;
+    }
+    const key = screen;
+    if (warned.current === key) return;
+    warned.current = key;
+    setBanner(warning);
+    const t = setTimeout(() => setBanner(null), 4200);
+    return () => clearTimeout(t);
+  }, [isWarning, screen]);
   if (!timer) return null;
   const { left, mode } = timer;
   return (
+    <>
+    {banner && screen !== 'ready' && screen !== 'session' ? <div className="timeout-banner" role="status">{banner}</div> : null}
     <div className={`timer ${mode === 'limit' && left <= warn ? 'warn' : ''}`} data-testid="timer" role="timer" aria-live="off">
       ⏱ {mode === 'est' ? (left > 0 ? `± ${mmss(left)}` : 'sebentar lagi') : mmss(left)}
     </div>
+    </>
   );
 }
 
@@ -218,6 +252,7 @@ export function App() {
   const capture = useBooth((s) => s.capture);
   const shotsPerAngle = useBooth((s) => s.session?.plan.shotsPerAngle ?? 2);
   const sessionId = useBooth((s) => s.session?.id ?? '');
+  const screenPreview = useBooth((s) => s.screenPreview);
   const maintenance = useBooth(
     (s) => !s.session && !s.entering && ((s.health && !s.health.acceptingSessions) || (s.config?.camera.mode === 'browser' && s.cameraState === 'error')),
   );
@@ -242,11 +277,15 @@ export function App() {
     robot.sync(maintenance ? 'welcome' : screen, sessionPose(capture.phase, capture.angle, capture.shot, shotsPerAngle, sessionId));
   }, [screen, capture.phase, capture.angle, capture.shot, shotsPerAngle, sessionId, maintenance]);
 
-  const View = SCREENS[screen];
+  const free = useBooth(isFree);
+  const View = screen === 'pay' && free && !screenPreview ? PayFree : SCREENS[screen];
   return (
     <>
       <div id="st" style={{ transform: `translate(${-960 * k}px,${-540 * k}px) scale(${k})`, left: '50%', top: '50%' }}>
         <div id="ct" style={{ position: 'absolute', inset: 0 }} data-screen={booted ? (maintenance ? 'maintenance' : screen) : 'boot'}>
+          {screenPreview ? (
+            <PreviewOverlay onClose={() => { history.replaceState(null, '', location.pathname); location.reload(); }} />
+          ) : null}
           {!booted ? (
             <div className="scr" style={{ alignItems: 'center', justifyContent: 'center', gap: 30, textAlign: 'center' }}>
               <Robot m="hi" s={300} />
@@ -267,4 +306,38 @@ export function App() {
       <DevBar />
     </>
   );
+}
+
+function PreviewOverlay({ onClose }: { onClose: () => void }) {
+  const tab = useBooth((s) => s.screenPreview);
+  const rows = useBooth((s) => s.previewRows);
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const [open, setOpen] = useState(false);
+  const audio = useRef<HTMLAudioElement>(null);
+  const list = rows.filter((x) => x.tab === tab);
+  const step = list[index];
+  useEffect(() => {
+    if (!step || !playing) return;
+    const element = audio.current;
+    let alive = true;
+    const next = () => alive && setIndex((i) => (i + 1) % Math.max(1, list.length));
+    if (step.uploaded || step.hasDefault) {
+      element!.src = step.uploaded ? `/storage/audio/booth/${step.id}.mp3` : `/api/audio/default/${step.id}.mp3`;
+      element!.onended = next;
+      element!.onerror = next;
+      void element!.play().catch(next);
+    } else {
+      const t = setTimeout(next, Math.max(1, step.screenSeconds || 6) * 1000);
+      return () => { alive = false; clearTimeout(t); };
+    }
+    return () => { alive = false; };
+  }, [step?.id, playing, tab]);
+  return <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(20,18,38,.96)', color: 'white', display: 'grid', gridTemplateRows: 'auto 1fr auto', padding: 24 }}>
+    <audio ref={audio} />
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}><b>Pratinjau booth · {tab} · {index + 1}/{list.length}</b><button className="btn" onClick={onClose}>Tutup pratinjau</button></div>
+    <div style={{ alignSelf: 'center', justifySelf: 'center', textAlign: 'center', maxWidth: 1000 }}><Robot m="hi" s={240} /><h1>{step?.script || 'Naskah kosong'}</h1><p>{step?.tone || step?.id}</p></div>
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}><button className="btn" onClick={() => setIndex((i) => (i + list.length - 1) % list.length)}>Sebelumnya</button><button className="btn pr" onClick={() => setPlaying((x) => !x)}>{playing ? 'Jeda' : 'Putar'}</button><button className="btn" onClick={() => setIndex((i) => (i + 1) % list.length)}>Lompat</button><button className="btn" onClick={() => setOpen((x) => !x)}>Langkah</button></div>
+    {open ? <div style={{ position: 'absolute', right: 20, top: 70, width: 380, maxHeight: '75vh', overflow: 'auto', background: '#fff', color: '#222', padding: 16 }}>{rows.map((x, i) => <button key={x.id} className="btn" onClick={() => { setIndex(i); }}>{x.id} · {x.script || 'Naskah kosong'}</button>)}</div> : null}
+  </div>;
 }

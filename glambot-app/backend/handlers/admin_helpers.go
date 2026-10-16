@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"photobooth/config"
 
@@ -75,6 +76,25 @@ func queryParam(r *http.Request, key string) string {
 		return ""
 	}
 	return v
+}
+
+// dateRange menambah filter ?from=&to= (YYYY-MM-DD, inklusif, zona waktu DB)
+// pada kolom col. Nilai yang bukan tanggal valid diabaikan.
+func dateRange(r *http.Request, col string, where []string, args []any) ([]string, []any) {
+	if d := queryParam(r, "from"); isDate(d) {
+		where = append(where, col+" >= ?::date")
+		args = append(args, d)
+	}
+	if d := queryParam(r, "to"); isDate(d) {
+		where = append(where, col+" < ?::date + 1")
+		args = append(args, d)
+	}
+	return where, args
+}
+
+func isDate(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
 }
 
 // sortDir menormalkan ?sortOrder= ke "ASC"/"DESC" (default DESC).

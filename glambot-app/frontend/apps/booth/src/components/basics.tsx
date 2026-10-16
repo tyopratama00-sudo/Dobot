@@ -2,6 +2,7 @@ import { memo, useMemo, type CSSProperties, type ReactNode } from 'react';
 import QRCode from 'qrcode';
 import { iconSvg, robotSvg, posedRobotSvg, qrModulesSvg, type IconName, type RobotMood } from '@photobooth/ui';
 import { TIP_CATEGORY_COLORS, type PoseTip } from '@photobooth/shared';
+import { useBooth } from '../store';
 
 /** Raw SVG markup (prototype generators) rendered without a layout wrapper. */
 export const Svg = memo(function Svg({ html, className, style }: { html: string; className?: string; style?: CSSProperties }) {
@@ -29,9 +30,11 @@ export function PosedRobot({ pose, s = 250 }: { pose: string; s?: number }) {
 const STEPS = ['Bayar', 'Foto', 'Edit', 'Simpan'];
 /** Journey indicator shown top-right on every customer page. */
 export function Steps({ cur }: { cur: number }) {
+  const free = useBooth((s) => s.config?.pricing.firstPrint === 0);
+  const steps = free ? ['Gratis', ...STEPS.slice(1)] : STEPS;
   return (
-    <div className="pay-steps" aria-label={`Langkah ${cur + 1}: ${STEPS[cur]}`}>
-      {STEPS.map((s, i) => (
+    <div className="pay-steps" aria-label={`Langkah ${cur + 1}: ${steps[cur]}`}>
+      {steps.map((s, i) => (
         <span key={s} className={i === cur ? 'cur' : ''}>
           <i />
           {s}

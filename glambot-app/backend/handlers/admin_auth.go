@@ -55,6 +55,45 @@ type adminLoginResponse struct {
 	Admin adminInfo `json:"admin"`
 }
 
+// POST /api/admin/password {oldPassword, newPassword} — ganti password admin yang login.
+func AdminChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims, err := auth.VerifyToken(strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")))
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "Sesi tidak valid")
+		return
+	}
+	var req struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "Format request tidak valid")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		respondError(w, http.StatusBadRequest, "Password baru minimal 8 karakter")
+		return
+	}
+	var hash string
+	if err := database.DB.QueryRow(`SELECT password_hash FROM admins WHERE id = ?`, claims.AdminID).Scan(&hash); err != nil {
+		respondError(w, http.StatusUnauthorized, "Akun tidak ditemukan")
+		return
+	}
+	if !auth.VerifyPassword(hash, req.OldPassword) {
+		respondError(w, http.StatusBadRequest, "Password lama salah")
+		return
+	}
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err == nil {
+		_, err = database.DB.Exec(`UPDATE admins SET password_hash = ? WHERE id = ?`, newHash, claims.AdminID)
+	}
+	if err != nil {
+		respondInternal(w, "change password", err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
 // POST /api/admin/login
 func AdminLogin(w http.ResponseWriter, r *http.Request) {
 	var req adminLoginRequest

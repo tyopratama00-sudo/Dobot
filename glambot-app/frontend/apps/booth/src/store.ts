@@ -24,6 +24,8 @@ export interface HealthState {
 
 export interface BoothState {
   booted: boolean;
+  screenPreview: string | null;
+  previewRows: { id: string; tab: string; script: string; tone: string; screenSeconds: number; uploaded: boolean; hasDefault: boolean }[];
   bootError: string | null;
   config: BoothConfig | null;
   health: HealthState | null;
@@ -68,6 +70,8 @@ export function sessionEnd(started: number, total: number, done: number, lastDon
 
 export const useBooth = create<BoothState>(() => ({
   booted: false,
+  screenPreview: null,
+  previewRows: [],
   bootError: null,
   config: null,
   health: null,
@@ -99,6 +103,7 @@ export const get = useBooth.getState;
 
 /** Which prototype screen to show. */
 export function currentScreen(s: BoothState, now = Date.now()): BoothScreen {
+  if (s.screenPreview) return (s.screenPreview === 'system' ? 'welcome' : s.screenPreview) as BoothScreen;
   if (s.clientError) return 'error';
   const sess = s.session;
   if (!sess) return 'welcome';

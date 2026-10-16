@@ -21,7 +21,7 @@ import {
 import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api/client';
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
-import { clipSeconds, voice } from './voice';
+import { clipSeconds, loadAudioUploads, voice } from './voice';
 import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, sessionEnd, set, type BoothState } from './store';
 
 /* ------------------------------------------------------------------ abort token (prototype `tok`) */
@@ -62,6 +62,16 @@ let beginScheduled = false;
 /* ------------------------------------------------------------------ boot & recovery */
 
 export async function boot() {
+  const previewTab = new URLSearchParams(location.search).get('preview');
+  let previewRows: { id: string; tab: string; script: string; tone: string; screenSeconds: number; uploaded: boolean; hasDefault: boolean }[] = [];
+  if (previewTab) {
+    try {
+      previewRows = await (await fetch('/api/audio/scripts')).json();
+    } catch {
+      previewRows = [];
+    }
+  }
+  void loadAudioUploads();
   for (let attempt = 0; ; attempt++) {
     try {
       const config = await api.config();
@@ -73,6 +83,17 @@ export async function boot() {
     }
   }
   const config = get().config!;
+  if (previewTab) {
+    set({
+      session: null,
+      bootError: null,
+      screenPreview: previewTab,
+      previewRows,
+      config: { ...config, pricing: { ...config.pricing, firstPrint: 1 } },
+      booted: true,
+    } as Partial<BoothState>);
+    return;
+  }
   const cam = getCamera(config.camera);
   cam.onStatus((st) => set({ cameraState: st.state, cameraError: st.lastError ?? null }));
   if (config.camera.mode === 'browser') void cam.start().catch(() => undefined);
@@ -298,6 +319,8 @@ export async function startSession() {
   if (s.entering || s.session) return;
   set({ entering: true, qty: s.config?.freeDigitalOnly ? 0 : 1, payError: null, payBusy: true });
   voice('welcome_start');
+  // Admin may have swapped clips since boot; the rest of the session uses the new list.
+  void loadAudioUploads();
   const t = tok;
   const anim = new Promise((r) => setTimeout(r, 1900));
   try {
@@ -345,7 +368,11 @@ export function setQty(delta: number) {
 }
 
 /** qty 0 = digital only (no print). */
-export const setDigital = (on: boolean) => pickQty(on ? 0 : 1);
+export const setDigital = (on: boolean) => {
+  const wasDigital = get().qty === 0;
+  pickQty(on ? 0 : 1);
+  if (wasDigital !== on) voice(on ? 'pay_digital' : 'pay_print');
+};
 
 function pickQty(q: number) {
   const s = get();
@@ -356,8 +383,17 @@ function pickQty(q: number) {
 }
 
 export function selectQrPayment() {
-  if (get().session?.status !== 'PAYMENT_SUCCESS') void requestPayment(get().qty);
+  if (get().session?.status !== 'PAYMENT_SUCCESS') {
+    voice('pay_show');
+    void requestPayment(get().qty);
+  }
 }
+
+export const voucherAudioCue = (outcome: 'invalid' | 'partial' | 'free') =>
+  ({ invalid: 'voucher_error', partial: 'voucher_partial', free: 'voucher_free' })[outcome];
+
+export const announceVoucherEntry = () => voice('voucher_show');
+export const announcePaymentMethods = () => voice('pay_method');
 
 export function retryPayment() {
   void guard('retry-pay', () => requestPayment(get().qty));
@@ -377,9 +413,18 @@ export async function applyFreeVoucher(code: string): Promise<string | null> {
   if (get().busy || get().session?.status === 'PAYMENT_SUCCESS') return 'Pembayaran sudah selesai.';
   set({ busy: 'voucher', payBusy: true, payError: null });
   try {
-    applySnapshot(await api.applyFreeVoucher(code, get().qty));
+    const oldSession = get().session?.id;
+    const snapshot = await api.applyFreeVoucher(code, get().qty);
+    applySnapshot(snapshot);
+    if (get().session?.status === 'WAITING_PAYMENT') {
+      set({ payBusy: false });
+      voice(voucherAudioCue('partial'));
+    } else if (oldSession && get().session?.status === 'PAYMENT_SUCCESS') {
+      voice(voucherAudioCue('free'));
+    }
     return null;
   } catch (e) {
+    voice(voucherAudioCue('invalid'));
     return voucherErrorMessage(e);
   } finally {
     set({ busy: null, payBusy: false });
@@ -776,6 +821,7 @@ export function finish() {
 /** Timeout handling per screen (unpaid → cancel, paid → auto-complete, done → finish). */
 export function onIdleTimeout() {
   const s = get();
+  if (s.screenPreview) return;
   const st = s.session?.status;
   if (!st) return;
   if (st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();

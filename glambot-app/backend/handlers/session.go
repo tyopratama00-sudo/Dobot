@@ -83,6 +83,16 @@ func CreateSession(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Invalid print count")
 		return
 	}
+	// Paket gratis: cetak dikunci 1 lembar supaya tidak bisa diakali lewat API.
+	if pkgInfo.Price == 0 && printUnitPrice == 0 {
+		printCount = 1
+		if settings, err := readAppSettings(keyFreeDigitalOnly); err != nil {
+			respondInternal(w, "read free mode output", err)
+			return
+		} else if settings[keyFreeDigitalOnly] == "1" {
+			printCount = 0
+		}
+	}
 
 	extraPrintCost := printCount * printUnitPrice
 	finalPrice := pkgInfo.Price + extraPrintCost

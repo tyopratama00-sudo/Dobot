@@ -23,8 +23,7 @@ export function Ready() {
       </div>
       <Cam style={{ flex: 1 }} ratio={ratio}>
         <div className="stat">
-          Cari posisimu dan duduk yang nyaman
-          <small>Kamu boleh bergerak bebas. Robot yang menyesuaikan.</small>
+          Cari posisi nyaman dan jaga jarak dari robot.
         </div>
       </Cam>
       <div className="bar" style={{ marginTop: 24 }}>

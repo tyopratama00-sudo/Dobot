@@ -172,6 +172,19 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 
+		// Master script audio booth (diedit admin). File: storage/audio/booth/<id>.mp3.
+		`CREATE TABLE IF NOT EXISTS audio_scripts (
+			id TEXT PRIMARY KEY,
+			tab TEXT NOT NULL,
+			sort INTEGER NOT NULL DEFAULT 0,
+			trigger_desc TEXT NOT NULL DEFAULT '',
+			script TEXT NOT NULL DEFAULT '',
+			tone TEXT NOT NULL DEFAULT '',
+			screen_seconds REAL NOT NULL DEFAULT 0,
+			source TEXT NOT NULL DEFAULT 'admin',
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
 		// Cegah transaksi pending duplikat per sesi (dulu SELECT-lalu-INSERT tidak
 		// atomik → 2 baris pending). 1) Rapikan data lama: sisakan pending
 		// terbaru, sisanya 'expired', supaya unique index di bawah bisa dibuat.
@@ -193,6 +206,9 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		if _, err := db.inner.Exec(statement); err != nil {
 			return err
 		}
+	}
+	if err := seedAudioScripts(db); err != nil {
+		return err
 	}
 
 	if _, err := db.inner.Exec(`

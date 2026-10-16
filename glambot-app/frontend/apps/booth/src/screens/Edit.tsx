@@ -183,7 +183,7 @@ export function Edit() {
             {g('drag', 'Geser foto')}
             {g('pinch', 'Cubit untuk zoom')}
             {g('twist', 'Putar 2 jari')}
-            {g('tap', 'Ketuk 2× reset')}
+            {g('tap', 'Sentuh 2× untuk reset')}
           </div>
           <div className="card" style={{ padding: 18, display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12 }}>
             {FILTERS.map((f) => (

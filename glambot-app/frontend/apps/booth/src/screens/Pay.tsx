@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { priceFor, rp } from '@photobooth/shared';
 import { useBooth } from '../store';
 import { Bubble, Icon, QrCode, Robot, Steps } from '../components/basics';
-import { applyFreeVoucher, backFromPay, retryPayment, selectQrPayment, setDigital, setQty } from '../flow';
+import { announcePaymentMethods, announceVoucherEntry, applyFreeVoucher, backFromPay, retryPayment, selectQrPayment, setDigital, setQty } from '../flow';
 import { puffs } from '../robot/floating';
 
 type PayPhase = 'wait' | 'transitioning' | 'ok';
@@ -30,6 +30,7 @@ export function Pay() {
   const qty = useBooth((s) => s.qty);
   const pricing = useBooth((s) => s.config!.pricing);
   const voucherChip = useBooth((s) => s.config!.voucherChip !== false);
+  const voucherChipCode = useBooth((s) => s.config!.voucherChipCode || 'FREE FOTO');
   const payBusy = useBooth((s) => s.payBusy);
   const payError = useBooth((s) => s.payError);
   const busy = useBooth((s) => s.busy);
@@ -81,7 +82,8 @@ export function Pay() {
   // ponytail: digital = package base_price (backend: base + 0 × print_unit_price). Add packages.digital_price if it must differ.
   const digitalPrice = pricing.firstPrint - pricing.additionalPrint;
   const listPrice = digital ? digitalPrice : priceFor(qty, pricing);
-  const total = voucherUsed ? 0 : payment || pay === 'ok' ? session.amount : listPrice;
+  const total = payment || pay === 'ok' ? session.amount : listPrice;
+  const voucherFree = voucherUsed && session.amount === 0;
   const urgent = qrReady && left > 0 && left <= 15;
   // Keep the QR mounted on the paid render before the effect flips phase (no flicker).
   const inQr = done || pay !== 'fail';
@@ -183,7 +185,7 @@ export function Pay() {
               <small>{digital ? 'Semua foto via QR' : `${rp(pricing.firstPrint)} cetak pertama${qty > 1 ? ` + ${qty - 1} × ${rp(pricing.additionalPrint)}` : ''}`}</small>
             </div>
             <div className="pay-select-total"><small>Total</small><b key={total} data-testid="total">{rp(total)}</b></div>
-            <button className="btn pr" onClick={() => { setStage('payment'); setMethod('choose'); }} data-testid="continue-payment" data-avoid>Lanjut ke pembayaran <Icon n="next" z={26} /></button>
+            <button className="btn pr" onClick={() => { setStage('payment'); setMethod('choose'); announcePaymentMethods(); }} data-testid="continue-payment" data-avoid>Lanjut ke pembayaran <Icon n="next" z={26} /></button>
           </div> : null}
           </> : null}
         </div>
@@ -208,7 +210,7 @@ export function Pay() {
                 <span className="pay-method-copy"><b>Bayar dengan QRIS</b><small>E-wallet atau mobile banking</small></span>
                 <Icon n="next" z={30} />
               </button>
-              <button className="pay-method voucher-method" onClick={() => setMethod('voucher')} data-testid="method-voucher">
+              <button className="pay-method voucher-method" onClick={() => { setMethod('voucher'); announceVoucherEntry(); }} data-testid="method-voucher">
                 <span className="pay-method-icon"><Icon n="ticket" z={48} /></span>
                 <span className="pay-method-copy"><b>Pakai kode voucher</b><small>Punya kode promo? Gunakan di sini</small></span>
                 <Icon n="next" z={30} />
@@ -225,13 +227,13 @@ export function Pay() {
                 </div>
                <div className="voucher-entry">
                <input className="voucher-input" aria-label="Kode voucher" value={voucherCode} readOnly inputMode="none" placeholder="Kode voucher" disabled={voucherUsed} onClick={() => setVoucherKeyboardOpen(true)} aria-haspopup="true" aria-expanded={voucherKeyboardOpen} data-avoid />
-               <button className={`btn pr voucher-submit ${busy === 'voucher' ? 'wait' : ''}`} onClick={() => void applyFreeVoucher(voucherCode).then((error) => { setVoucherError(error); if (!error) { setVoucherUsed(true); setVoucherKeyboardOpen(false); } })} disabled={voucherUsed || !voucherCode.trim() || !!busy} data-avoid>
+                <button className={`btn pr voucher-submit ${busy === 'voucher' ? 'wait' : ''}`} onClick={() => void applyFreeVoucher(voucherCode).then((error) => { setVoucherError(error); if (!error) { setVoucherUsed(true); setVoucherKeyboardOpen(false); setMethod('qris'); } })} disabled={voucherUsed || !voucherCode.trim() || !!busy} data-avoid>
                  <Icon n={voucherUsed ? 'check' : 'ticket'} z={23} />{voucherUsed ? 'Berhasil' : 'Pakai'}
                </button>
                </div>
                 {voucherChip && !voucherKeyboardOpen ? (
-                <button className="voucher-chip" type="button" onClick={() => { setVoucherCode('FREE FOTO'); setVoucherError(null); }} disabled={voucherUsed}>
-                  <Icon n="ticket" z={25} /><span><b>FREE FOTO</b><small>Ketuk untuk pakai</small></span><Icon n="next" z={23} />
+                <button className="voucher-chip" type="button" onClick={() => { setVoucherCode(voucherChipCode); setVoucherError(null); }} disabled={voucherUsed}>
+                  <Icon n="ticket" z={25} /><span><b>{voucherChipCode}</b><small>Ketuk untuk pakai</small></span><Icon n="next" z={23} />
                 </button>
                ) : null}
                {voucherError ? <div className="pill f voucher-error" role="alert"><Icon n="x" z={22} />{voucherError}</div> : null}
@@ -259,11 +261,13 @@ export function Pay() {
               <div className="pay-qrwrap" data-testid={!done ? 'pay-waiting' : undefined}>
               <div className="free-halo" aria-hidden><i /><i /><i /></div>
               <div className={`qrbox pay-qr ${qrReady || done ? '' : 'busy'} ${done ? '' : 'spin'}`} data-testid="qris" data-avoid>
-                {voucherUsed ? (
-                  <div className={`qrin voucher-paid ${done ? 'gone' : ''}`} aria-label="Voucher FREE FOTO">
+                {voucherFree ? (
+                  <div className={`qrin voucher-paid ${done ? 'gone' : ''}`} aria-label={`Voucher ${voucherChipCode}`}>
                     <Icon n="ticket" z={120} />
-                    <b>FREE FOTO</b>
+                    <b>{voucherChipCode}</b>
                   </div>
+                ) : voucherFree ? (
+                  <div className={`qrin voucher-paid ${done ? 'gone' : ''}`} aria-label="Voucher lunas"><Icon n="ticket" z={120} /><b>LUNAS</b></div>
                 ) : (
                   <>
                     <div className={`qrin ${done ? 'gone' : ''}`}>

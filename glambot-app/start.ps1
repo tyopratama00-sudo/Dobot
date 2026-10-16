@@ -1,9 +1,9 @@
 <#
     Glambot Photo Booth - one-command launcher.
 
-    Nyalain backend (Go), booth (Vite), dan dobot (Python) sekaligus di
-    satu window Windows Terminal (3 pane), lalu buka Chrome kiosk ke booth
-    dengan profil browser yang baru tiap start.
+    Nyalain backend (Go), booth (Vite), dobot (Python), dan admin (Vite) sekaligus
+    di satu window Windows Terminal (4 pane), lalu buka Chrome kiosk ke booth
+    dengan profil browser yang baru tiap start. Admin: http://localhost:5174/admin/
 
     Urutannya berantai -- backend -> dobot -> booth -- dan tiap pane nunggu
     gilirannya sendiri dengan cara ngecek port pendahulunya:
@@ -11,6 +11,7 @@
         backend    langsung jalan
         dobot      nunggu :APP_PORT   -> baru python main.py
         booth      nunggu :APP_PORT + :PORT(dobot) -> baru npm run preview
+        admin      langsung jalan (vite dev, proxy /api ke backend)
 
     Booth defaultnya production: build lalu preview. Pakai `-Dev` untuk HMR.
 
@@ -29,12 +30,12 @@
         .\start.ps1 -NoPull         jangan ambil update dari main
 
     Parameter -Service dipakai internal: tiap pane manggil balik skrip ini
-    dengan -Service backend|frontend|dobot. Jangan dipanggil manual.
+    dengan -Service backend|frontend|dobot|admin. Jangan dipanggil manual.
 #>
 
 [CmdletBinding()]
 param(
-    [ValidateSet('backend', 'frontend', 'dobot')]
+    [ValidateSet('backend', 'frontend', 'dobot', 'admin')]
     [string] $Service,
 
     [switch] $Clean,
@@ -318,6 +319,7 @@ function Show-UpdateImpact {
 $BackendPort  = [int] (Get-EnvValue (Join-Path $BackendDir  '.env')       'APP_PORT' '8080')
 $DobotPort    = [int] (Get-EnvValue (Join-Path $DobotDir    '.env')       'PORT'     '5001')
 $FrontendPort = 5173
+$AdminPort    = 5174
 
 # =========================================================================
 #  MODE PANE - dipanggil balik oleh window utama, satu service per pane
@@ -375,6 +377,14 @@ if ($Service) {
             }
             & $npm run preview -w @photobooth/booth -- --host 0.0.0.0
         }
+        'admin' {
+            Set-Location $FrontendDir
+            Write-Host "=== ADMIN (Vite) :$AdminPort ===" -ForegroundColor Green
+            $npm = Get-ToolPath 'npm.cmd' 'Pasang Node.js dari https://nodejs.org dan pastikan folder-nya masuk PATH.'
+            if (-not $npm) { return }
+            # ponytail: admin pakai vite dev (tanpa build). Pindah ke build+preview kalau dipakai di luar LAN.
+            & $npm run dev -w @photobooth/admin -- --host 0.0.0.0
+        }
         'dobot' {
             Set-Location $DobotDir
             Write-Host "=== DOBOT (Python) :$DobotPort ===" -ForegroundColor Yellow
@@ -407,12 +417,12 @@ if ($Service) {
 }
 
 # =========================================================================
-#  MODE LAUNCHER - preflight, bersih-bersih, lalu spawn 3 pane
+#  MODE LAUNCHER - preflight, bersih-bersih, lalu spawn 4 pane
 # =========================================================================
 
 Write-Host ''
 Write-Host '  GLAMBOT PHOTO BOOTH' -ForegroundColor White
-Write-Host ("  backend :{0}   booth :{1}   dobot :{2}" -f $BackendPort, $FrontendPort, $DobotPort) -ForegroundColor DarkGray
+Write-Host ("  backend :{0}   booth :{1}   dobot :{2}   admin :{3}" -f $BackendPort, $FrontendPort, $DobotPort, $AdminPort) -ForegroundColor DarkGray
 Write-Host ''
 
 # --- 1. update kode dari main (sebelum apa pun, biar preflight & build lihat
@@ -462,6 +472,7 @@ Write-Host '[3/6] bersihin port nyangkut' -ForegroundColor Cyan
 Stop-Port -Port $BackendPort  -Label 'backend'
 Stop-Port -Port $FrontendPort -Label 'frontend'
 Stop-Port -Port $DobotPort    -Label 'dobot'
+Stop-Port -Port $AdminPort    -Label 'admin'
 
 # --- 4. cache
 
@@ -516,21 +527,22 @@ function Get-PaneCommand {
 
 $wt = Get-Command wt.exe -ErrorAction SilentlyContinue
 if ($wt) {
-    # backend kiri | booth kanan / dobot bawah.
+    # backend kiri | booth kanan / dobot bawah | admin di samping dobot.
     # split-pane selalu memecah pane yang lagi fokus, dan fokus pindah ke pane
     # baru setelah split.
     $wtArgs = @(
         "-w new new-tab --title backend -d `"$BackendDir`" $(Get-PaneCommand 'backend')",
         "split-pane -V --title booth -d `"$FrontendDir`" $(Get-PaneCommand 'frontend')",
-        "split-pane -H --title dobot -d `"$DobotDir`" $(Get-PaneCommand 'dobot')"
+        "split-pane -H --title dobot -d `"$DobotDir`" $(Get-PaneCommand 'dobot')",
+        "split-pane -V --title admin -d `"$FrontendDir`" $(Get-PaneCommand 'admin')"
     ) -join ' ; '
 
     Start-Process -FilePath $wt.Source -ArgumentList $wtArgs
-    Write-Host '      Windows Terminal: 3 pane (backend | booth / dobot)' -ForegroundColor DarkGray
+    Write-Host '      Windows Terminal: 4 pane (backend | booth / dobot | admin)' -ForegroundColor DarkGray
 } else {
-    # Fallback kalau Windows Terminal tidak terpasang: 3 window biasa.
-    Write-Host '      wt.exe tidak ada -> pakai 3 window terpisah' -ForegroundColor DarkYellow
-    foreach ($s in @('backend', 'frontend', 'dobot')) {
+    # Fallback kalau Windows Terminal tidak terpasang: 4 window biasa.
+    Write-Host '      wt.exe tidak ada -> pakai 4 window terpisah' -ForegroundColor DarkYellow
+    foreach ($s in @('backend', 'frontend', 'dobot', 'admin')) {
         Start-Process -FilePath $PSExe `
             -ArgumentList "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$self`" -Service $s$flags"
     }
@@ -540,7 +552,7 @@ if ($wt) {
 
 if ($NoBrowser) {
     Write-Host '[6/6] -NoBrowser: browser tidak dibuka' -ForegroundColor Cyan
-    Write-Host ("`n      buka manual: http://localhost:{0}`n" -f $FrontendPort) -ForegroundColor White
+    Write-Host ("`n      buka manual: http://localhost:{0}   admin: http://localhost:{1}/admin/`n" -f $FrontendPort, $AdminPort) -ForegroundColor White
     exit 0
 }
 
@@ -594,4 +606,5 @@ $chromeArgs = @(
 Start-Process -FilePath $chrome -ArgumentList $chromeArgs
 Write-Host ''
 Write-Host ("      kiosk terbuka -> {0}  (profil bersih, keluar dengan Alt+F4)" -f $url) -ForegroundColor Green
+Write-Host ("      admin         -> http://localhost:{0}/admin/" -f $AdminPort) -ForegroundColor Green
 Write-Host ''

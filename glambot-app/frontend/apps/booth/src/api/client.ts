@@ -245,12 +245,14 @@ class Api {
   /* ---- boot */
 
   async config(): Promise<BoothConfig> {
-    const [pkgs, frames, paymentConfig] = await Promise.all([
+    const [pkgs, frames, paymentConfig, appConfig] = await Promise.all([
       go<GoPackage[]>('GET', '/api/package'),
       go<GoFrame[]>('GET', '/api/frames'),
       go<{ test_payment_enabled: boolean }>('GET', '/api/payment/config'),
+      go<{ voucherChipEnabled?: boolean; voucherChipCode?: string; freeDigitalOnly?: boolean; timeouts?: Partial<BoothConfig['timeouts']> }>('GET', '/api/config').catch(() => ({ voucherChipEnabled: true, voucherChipCode: 'FREE FOTO', freeDigitalOnly: false, timeouts: {} })),
     ]);
-    const priced = pkgs.filter((p) => p.print_unit_price > 0);
+    // Free mode zeroes every price, so a 0 print price must still pick the print package.
+    const priced = pkgs.filter((p) => p.print_unit_price > 0 || p.price + p.print_unit_price === 0);
     this.pkg = priced.find((p) => p.is_popular) ?? pkgs.find((p) => p.code === 'vip') ?? priced[0] ?? pkgs[0] ?? null;
     if (!this.pkg) throw new Error('Belum ada paket aktif di admin');
     this.packageDurationSecs = this.pkg.duration_secs || 600;
@@ -261,7 +263,7 @@ class Api {
     return {
       pricing: { ...d.pricing, firstPrint: this.pkg.price + this.pkg.print_unit_price, additionalPrint: this.pkg.print_unit_price },
       session: { ...d.session, shotsPerAngle: 1, retakeLimit: 2 },
-      timeouts: d.timeouts,
+      timeouts: { ...d.timeouts, ...appConfig.timeouts },
       // Go returns the Canon live view already mirrored.
       camera: { ...camera, mirrorPreview: false, mode: 'server', liveViewUrl: '/api/robot/liveview' },
       templates: this.templates,
@@ -270,6 +272,9 @@ class Api {
       timingScale: 1,
       devTools: false,
       mockPayment: paymentConfig.test_payment_enabled,
+      voucherChip: appConfig.voucherChipEnabled !== false,
+      voucherChipCode: appConfig.voucherChipCode || 'FREE FOTO',
+      freeDigitalOnly: appConfig.freeDigitalOnly === true,
       environment: 'production',
     };
   }
@@ -377,16 +382,14 @@ class Api {
     return snap;
   }
 
-  async applyFreeVoucher(code: string): Promise<SessionSnapshot> {
+  async applyFreeVoucher(code: string, quantity: number): Promise<SessionSnapshot> {
     if (!this.snap || !this.pkg || !UNPAID.includes(this.st)) throw new ApiError(409, 'INVALID_TRANSITION', 'Voucher hanya bisa dipakai sebelum pembayaran');
-    if (code.trim().toUpperCase() !== 'FREE FOTO') throw new ApiError(400, 'INVALID_VOUCHER', 'Kode voucher tidak ditemukan.');
-    const quantity = this.snap.quantity;
     const sessionId = await go<GoSession>('POST', '/api/session/create', { packageId: this.pkg.id, printCount: quantity }).then((s) => s.id);
     if (!sessionId) throw new ApiError(409, 'INVALID_TRANSITION', 'Sesi pembayaran belum siap');
     const result = await go<VoucherResult>('POST', '/api/voucher/apply', { session_id: sessionId, voucher_code: code });
-    if (!result.valid || result.final_price !== 0) {
+    if (!result.valid) {
       void go('PATCH', `/api/session/${sessionId}/status`, { status: 'expired' }).catch(() => undefined);
-      throw new ApiError(400, 'INVALID_VOUCHER', result.valid ? 'Voucher ini tidak membuat pembayaran gratis.' : result.message);
+      throw new ApiError(400, 'INVALID_VOUCHER', result.message);
     }
     const seq = ++this.paySeq;
     this.stopPoll();
@@ -396,20 +399,24 @@ class Api {
       void go('PATCH', `/api/session/${sessionId}/status`, { status: 'expired' }).catch(() => undefined);
       return this.snap!;
     }
-    if (payment.transaction?.status !== 'paid' || payment.session.status !== 'paid')
-      throw new ApiError(502, 'INVALID_FREE_PAYMENT', 'Sesi gratis belum dikonfirmasi backend.');
+    if (!payment.transaction?.midtrans_order_id || (!payment.transaction.qris_raw_string && !payment.transaction.qris_url && payment.transaction.status !== 'paid'))
+      throw new ApiError(502, 'INVALID_PAYMENT_RESPONSE', 'Backend tidak mengembalikan ID transaksi atau QRIS yang valid.');
     this.goId = sessionId;
     this.orderId = payment.transaction.midtrans_order_id;
     if (previousGoId) void go('PATCH', `/api/session/${previousGoId}/status`, { status: 'expired' }).catch(() => undefined);
+    const paid = payment.transaction.status === 'paid' || payment.session.status === 'paid';
     const now = new Date().toISOString();
-    return this.emit({
+    const snap = this.emit({
       code: sessionId.slice(0, 8).toUpperCase(),
-      status: 'PAYMENT_SUCCESS',
-      amount: 0,
+      status: paid ? 'PAYMENT_SUCCESS' : 'WAITING_PAYMENT',
+      quantity,
+      amount: payment.session.final_price,
       expiresAt: payment.session.expires_at,
-      paidAt: now,
-      payment: { id: payment.transaction.midtrans_order_id, provider: 'midtrans', status: 'PAID', amount: 0, quantity: this.snap.quantity, qrString: '', expiresAt: payment.session.expires_at, paidAt: now },
+      paidAt: paid ? now : null,
+      payment: { id: payment.transaction.midtrans_order_id, provider: 'midtrans', status: paid ? 'PAID' : 'PENDING', amount: payment.session.final_price, quantity, qrString: payment.transaction.qris_raw_string || payment.transaction.qris_url || '', expiresAt: payment.session.expires_at, paidAt: paid ? now : null },
     });
+    if (!paid) this.startPoll();
+    return snap;
   }
 
   private startPoll() {
@@ -656,10 +663,11 @@ class Api {
       return;
     }
     try {
-      await go('POST', '/api/photo/print', { session_id: goId }, undefined, 60000);
+      // Digital only: backend prints print_count 0 as 1 copy, so never call it.
+      if (this.snap!.quantity > 0) await go('POST', '/api/photo/print', { session_id: goId }, undefined, 60000);
       if (!alive()) return;
       this.emit({ status: 'PRINT_SUCCESS', print: { ...this.snap!.print!, status: 'COMPLETED', progress: 100 } });
-      await sleep(2500);
+      await sleep(this.snap!.quantity > 0 ? 2500 : 800);
     } catch (e) {
       if (!alive()) return;
       const msg = (e as Error).message;

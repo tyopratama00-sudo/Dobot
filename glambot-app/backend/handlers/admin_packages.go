@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -291,6 +292,60 @@ func AdminUpdatePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, p)
+}
+
+// POST /api/admin/free-mode {enabled}. Aktif: simpan harga semua paket ke
+// app_settings lalu nolkan. Nonaktif: kembalikan harga dari simpanan itu.
+// ponytail: edit harga manual selama Mode Gratis ditimpa saat restore.
+func AdminSetFreeMode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "Body tidak valid")
+		return
+	}
+
+	tx, err := database.DB.Begin()
+	if err != nil {
+		respondInternal(w, "free mode begin", err)
+		return
+	}
+	defer tx.Rollback()
+
+	var backup string
+	err = tx.QueryRow(`SELECT value FROM app_settings WHERE key = ? FOR UPDATE`, keyFreeModeBackup).Scan(&backup)
+	if err != nil && err != sql.ErrNoRows {
+		respondInternal(w, "free mode read", err)
+		return
+	}
+	active := err == nil
+
+	switch {
+	case body.Enabled && !active:
+		if err = tx.QueryRow(`SELECT COALESCE(json_object_agg(id, json_build_array(base_price, print_unit_price)), '{}')::text FROM packages`).Scan(&backup); err == nil {
+			_, err = tx.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, NOW())`, keyFreeModeBackup, backup)
+		}
+		if err == nil {
+			_, err = tx.Exec(`UPDATE packages SET base_price = 0, print_unit_price = 0, updated_at = NOW()`)
+		}
+	case !body.Enabled && active:
+		_, err = tx.Exec(`UPDATE packages p
+			SET base_price = (j.v->>0)::int, print_unit_price = (j.v->>1)::int, updated_at = NOW()
+			FROM json_each(?::json) AS j(id, v)
+			WHERE p.id = j.id::bigint`, backup)
+		if err == nil {
+			_, err = tx.Exec(`DELETE FROM app_settings WHERE key = ?`, keyFreeModeBackup)
+		}
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		respondInternal(w, "free mode", err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]bool{"freeMode": body.Enabled})
 }
 
 // DELETE /api/admin/packages/{id}

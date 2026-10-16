@@ -48,7 +48,8 @@ type robotSettings struct {
 	FaceTrackMaxDevDeg   float64 `json:"faceTrackMaxDevDeg"`
 }
 
-// Default = nilai .env dobot. Menjaga perilaku identik saat DB kosong.
+// Default = nilai dobot/.env.example. Menjaga perilaku identik saat DB kosong
+// (dicek TestRobotDefaultsMatchDobotEnv).
 var robotDefaults = robotSettings{
 	RobotSpeedFactor:     100,
 	RobotJointSpeed:      80,
@@ -56,8 +57,8 @@ var robotDefaults = robotSettings{
 	SafetyTimeout:        10,
 	PostActionDelay:      0.5,
 	SequenceSlotSec:      30,
-	FaceTrackGainPan:     8,
-	FaceTrackGainTilt:    6,
+	FaceTrackGainPan:     18,
+	FaceTrackGainTilt:    14,
 	FaceTrackDeadbandPct: 6,
 	FaceTrackMaxDevDeg:   20,
 }
@@ -212,6 +213,19 @@ func AdminUpdateRobotSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	forwardRobotSettings(w)
+}
+
+// DELETE /api/admin/robot-settings — hapus override, kembali ke nilai .env dobot.
+func AdminResetRobotSettings(w http.ResponseWriter, r *http.Request) {
+	if err := deleteAppSettings(robotSettingKeys...); err != nil {
+		respondInternal(w, "reset robot settings", err)
+		return
+	}
+	forwardRobotSettings(w)
+}
+
+func forwardRobotSettings(w http.ResponseWriter) {
 	cfg, err := loadRobotSettings()
 	if err != nil {
 		respondInternal(w, "reload robot settings", err)

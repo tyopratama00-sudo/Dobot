@@ -103,6 +103,22 @@ test('onEnd fires after the queued pose clip ends (or fails), not when cut', asy
   expect(ended).toBe(2);
 });
 
+test('admin upload plays first; a missing upload falls back to the built-in clip', async () => {
+  const { voice, loadAudioUploads } = await import('./voice');
+  (globalThis as any).fetch = async () => ({ ok: true, json: async () => ({ pay_ok: '7' }) });
+  await loadAudioUploads();
+  played.length = 0;
+  voice('pay_ok');
+  expect(last.src).toBe('/storage/audio/booth/pay_ok.mp3?v=7');
+  last.fail();
+  expect(last.src).toMatch(/\/audio\/pay_ok\.mp3$/);
+  expect(last.src).not.toContain('storage');
+  last.end();
+  voice('pay_ok');
+  expect(last.src).not.toContain('storage');
+  last.end();
+});
+
 test('shutter cue waits for final countdown word', async () => {
   const { voice } = await import('./voice');
   played.length = 0;

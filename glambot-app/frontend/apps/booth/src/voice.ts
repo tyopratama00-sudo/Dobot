@@ -1,5 +1,6 @@
 /**
- * Robot voice clips (public/audio/<name>.mp3), one channel. A new cue cuts
+ * Robot voice clips (admin upload storage/audio/booth/<name>.mp3, else
+ * public/audio/<name>.mp3), one channel. A new cue cuts
  * whatever is playing or waiting, so the voice always matches the screen.
  * Clips passed together play in order. `after` = filler: queue behind the
  * current clip instead of cutting it. `when` is checked as the cue's turn
@@ -7,19 +8,42 @@
  */
 type Cue = { name: string; when?: () => boolean; onEnd?: () => void };
 let cur: HTMLAudioElement | null = null;
+let curName = '';
 let queue: Cue[] = [];
+/** id → version of clips uploaded in admin (storage/audio/booth); others use public/audio. */
+let uploads: Record<string, string> = {};
+
+/** Refresh the admin upload list; on failure keep the last one. */
+export async function loadAudioUploads() {
+  try {
+    const r = await fetch('/api/audio', { cache: 'no-store' });
+    if (r.ok) uploads = await r.json();
+  } catch {
+    /* offline: keep last list */
+  }
+}
+
+export const audioUrl = (name: string) =>
+  uploads[name] ? `/storage/audio/booth/${name}.mp3?v=${uploads[name]}` : `${import.meta.env.BASE_URL}audio/${name}.mp3`;
 
 function play(cue: Cue) {
   if (cue.when && !cue.when()) return next();
-  const a = new Audio(`${import.meta.env.BASE_URL}audio/${cue.name}.mp3`);
+  const uploaded = !!uploads[cue.name];
+  const a = new Audio(audioUrl(cue.name));
   cur = a;
+  curName = cue.name;
   const done = () => {
     if (cur !== a) return;
     cue.onEnd?.();
     next();
   };
   a.addEventListener('ended', done);
-  a.addEventListener('error', done);
+  // Upload gone (detached since the last refresh): fall back to the built-in clip.
+  a.addEventListener('error', () => {
+    if (cur !== a || !uploaded) return done();
+    delete uploads[cue.name];
+    play(cue);
+  });
   // Autoplay blocked: skip silently. Load errors are handled by the 'error' listener.
   a.play().catch((e: Error) => e.name === 'NotAllowedError' && done());
 }
@@ -33,7 +57,7 @@ function next() {
 /** Clip length in seconds (0 if missing or slow to load). */
 export function clipSeconds(name: string) {
   return new Promise<number>((done) => {
-    const a = new Audio(`${import.meta.env.BASE_URL}audio/${name}.mp3`);
+    const a = new Audio(audioUrl(name));
     a.preload = 'metadata';
     a.addEventListener('loadedmetadata', () => done(a.duration || 0), { once: true });
     a.addEventListener('error', () => done(0), { once: true });
@@ -44,7 +68,7 @@ export function clipSeconds(name: string) {
 /** Stop a clip now (playing or waiting) without starting another, e.g. leaving the welcome page. */
 export function hush(name: string) {
   queue = queue.filter((c) => c.name !== name);
-  if (cur?.src.endsWith(`/${name}.mp3`)) {
+  if (cur && curName === name) {
     cur.pause();
     next();
   }

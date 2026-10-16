@@ -170,6 +170,7 @@ func buildTxFilter(r *http.Request) (string, []any) {
 		where = append(where, "EXTRACT(MONTH FROM t.created_at) = ?")
 		args = append(args, m)
 	}
+	where, args = dateRange(r, "t.created_at", where, args)
 	return strings.Join(where, " AND "), args
 }
 
