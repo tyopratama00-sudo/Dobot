@@ -22,6 +22,7 @@ export function Final() {
   const flat = useFlatPhotos();
   const session = useBooth((s) => s.session)!;
   const edits = useBooth((s) => s.edits);
+  const stickers = useBooth((s) => s.stickers);
   const label = useBooth((s) => s.config!.branding.label);
   const busy = useBooth((s) => s.busy);
   const slots = useFrameSlots();
@@ -51,7 +52,7 @@ export function Final() {
       </div>
       <div className="row" style={{ alignItems: 'center', justifyContent: 'center', gap: 96, position: 'relative', zIndex: 2, paddingBottom: 30 }}>
         <div className="float" style={{ animationDuration: '8s' }}>
-          <Frame t={t} h={760} mode={2} slots={slots} edits={Object.keys(edits).length ? edits : serverEdits} label={t.label || label} hiRes />
+          <Frame t={t} h={760} mode={2} slots={slots} edits={Object.keys(edits).length ? edits : serverEdits} label={t.label || label} hiRes stickers={stickers} />
         </div>
         <div className="card final-card" style={{ width: 700, padding: '44px 52px', display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div>
@@ -141,6 +142,7 @@ export function Qr() {
   const busy = useBooth((s) => s.busy);
   const slots = useFrameSlots();
   const edits = Object.fromEntries(session.slots.map((x) => [x.slotIndex, x.edit]));
+  const stickers = useBooth((s) => s.stickers);
   const url = session.gallery?.url ?? '';
   const preview = session.gallery?.preview;
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -152,7 +154,7 @@ export function Qr() {
           {preview && !previewFailed ? (
             <img src={preview} alt="Hasil fotomu" draggable={false} onError={() => setPreviewFailed(true)} style={{ height: 780, display: 'block', borderRadius: 24, boxShadow: 'var(--sh)' }} />
           ) : (
-            <Frame t={t} h={780} mode={4} slots={slots} edits={edits} cycle={flat} label={t.label || label} hiRes />
+            <Frame t={t} h={780} mode={4} slots={slots} edits={edits} cycle={flat} label={t.label || label} hiRes stickers={stickers} />
           )}
         </div>
         <div style={{ flex: 1, maxWidth: 1000, display: 'flex', flexDirection: 'column', gap: 30 }}>

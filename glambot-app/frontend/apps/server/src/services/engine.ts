@@ -737,10 +737,11 @@ export class SessionEngine {
     }
   }
 
-  /** RENDERING → (composite + print page) → PRINTING with a persistent print job. */
+  /** Render output; digital-only sessions skip printer queue and go straight to gallery. */
   async runOutputPipeline(id: string) {
     if (this.pipelines.has(id)) return;
     this.pipelines.add(id);
+    let digitalOnly = false;
     try {
       await this.mutex.run(id, async () => {
         const s = await this.load(id);
@@ -758,6 +759,11 @@ export class SessionEngine {
           return;
         }
         logEvent(this.d.log, 'render_success', { sessionId: id, ms: Date.now() - started, reused: out.reused, width: out.width, height: out.height });
+        if (s.printQuantity === 0) {
+          await this.move(s, 'RENDER_DONE_DIGITAL', { renderHash: out.hash, compositePath: out.compositeKey, printFilePath: out.printKey });
+          digitalOnly = true;
+          return;
+        }
         const cfg = this.d.settings.get();
         const job = await this.d.prisma.printJob.create({
           data: {
@@ -772,6 +778,7 @@ export class SessionEngine {
         logEvent(this.d.log, 'print_queued', { sessionId: id, jobId: job.id, copies: job.copies });
         await this.move(s, 'RENDER_DONE', { renderHash: out.hash, compositePath: out.compositeKey, printFilePath: out.printKey }, { jobId: job.id });
       });
+      if (digitalOnly) await this.generateGallery(id);
     } finally {
       this.pipelines.delete(id);
     }
@@ -790,8 +797,8 @@ export class SessionEngine {
   async generateGallery(sessionId: string) {
     await this.mutex.run(sessionId, async () => {
       let s: Session = await this.load(sessionId);
-      if (s.status !== 'PRINT_SUCCESS' && s.status !== 'PRINT_FAILED') return;
-      s = await this.move(s, 'GENERATE_GALLERY');
+      if (s.status === 'PRINT_SUCCESS' || s.status === 'PRINT_FAILED') s = await this.move(s, 'GENERATE_GALLERY');
+      else if (s.status !== 'GENERATING_GALLERY') return;
       try {
         const g = await this.d.gallery.create(s);
         s = await this.d.prisma.session.findUniqueOrThrow({ where: { id: sessionId } });

@@ -7,7 +7,7 @@ type Field = [key: string, label: string, min: number, max: number, step?: numbe
 
 // Ranges mirror backend validation (config.go timerFields/sessionFields/displayFields, robot_settings.go robotRanges).
 const SESSION: Field[] = [
-  ['readySeconds', 'Hitung mundur sebelum foto', 1, 30, 1, 'detik'],
+  ['readySeconds', 'Hitung mundur bila audio countdown tidak ada', 1, 30, 1, 'detik'],
   ['retakeLimit', 'Batas foto ulang per sesi', 0, 20, 1, 'kali'],
   ['maxQuantity', 'Maks jumlah cetak', 1, 50, 1, 'lembar'],
 ];

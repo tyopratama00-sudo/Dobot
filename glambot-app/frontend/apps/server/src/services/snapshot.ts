@@ -99,7 +99,7 @@ export function buildSnapshot(s: FullSession, media: MediaService, galleryUrl: (
     slots: s.edits.map((e) => ({ slotIndex: e.slotIndex, photoId: e.photoId, edit: editFromRow(e) })),
     retakenAngles: s.retakenAngles,
     capture: { angle: s.captureAngle, shot: s.captureShot, retakeAngle: s.retakeAngle },
-    print: printDto(sessionJob),
+    print: s.printQuantity === 0 ? null : printDto(sessionJob),
     gallery:
       s.galleryToken && s.galleryExpiresAt ? { url: galleryUrl(s.galleryToken), expiresAt: s.galleryExpiresAt.toISOString() } : null,
     version: s.version,

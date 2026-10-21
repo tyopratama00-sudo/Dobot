@@ -114,6 +114,8 @@ export interface BoothConfig {
   voucherChipCode?: string;
   /** Admin choice for free sessions: skip print and deliver files by QR only. */
   freeDigitalOnly?: boolean;
+  /** Explicit admin free/paid mode; independent of a package's price. */
+  freeMode?: boolean;
   environment: string;
 }
 

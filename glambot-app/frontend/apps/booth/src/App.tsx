@@ -6,6 +6,7 @@ import { robot } from './robot/floating';
 import { Welcome } from './screens/Welcome';
 import { Pay } from './screens/Pay';
 import { PayFree } from './screens/PayFree';
+import { isFreeMode } from './payment-mode';
 import { Ready, Session, sessionPose } from './screens/Capture';
 import { Lightbox, Review } from './screens/Review';
 import { Pick, Tpl } from './screens/Select';
@@ -13,7 +14,7 @@ import { Edit } from './screens/Edit';
 import { Final, Print, Qr, Thanks } from './screens/Output';
 import { DevBar, ErrorScreen, Maintenance, Notice, ReconnectOverlay } from './screens/System';
 import { Robot } from './components/basics';
-import { hush, voice, voiceOnScreen } from './voice';
+import { hush, printDoneCue, voice, voiceOnScreen } from './voice';
 import { api } from './api/client';
 import { timeoutWarningText } from './timeout-notification';
 
@@ -32,12 +33,16 @@ const SCREEN_VOICE: Partial<Record<BoothScreen | 'maintenance', string[]>> = {
   error: ['err_general'],
 };
 
+/** Welcome attract voice repeat, start to start (clip is ~12.5s). */
+const WELCOME_IDLE_MS = 60_000;
+
 /** "Get ready, I'll count" cues played between the pose tip and 3-2-1. */
 const HOLDS = ['hold_1', 'hold_2', 'hold_4'];
 
 /** Voice cue on screen change, plus the few status changes inside one screen. */
 function useScreenVoice(screen: BoothScreen | 'maintenance') {
   const status = useBooth((s) => s.session?.status);
+  const quantity = useBooth((s) => s.session?.quantity ?? 0);
   const expired = useBooth((s) => s.session?.payment?.status === 'EXPIRED');
   const online = useBooth((s) => s.online);
   const idle = useBooth((s) => s.timer?.mode === 'limit' && s.timer.left <= (s.config?.timeouts.warningSeconds ?? 15));
@@ -52,11 +57,11 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
     }
     if (status === 'PAYMENT_SUCCESS') voice('pay_ok');
     else if (status === 'PAYMENT_FAILED') voice(expired ? 'pay_qr_expired' : 'pay_retry');
-    else if (status === 'PRINT_SUCCESS') voice('print_done');
+    else if (status === 'PRINT_SUCCESS' && printDoneCue(quantity)) voice(printDoneCue(quantity)!);
     // Countdown audio must start with the on-screen digits, so it cuts pay_ok.
     else if (changed && screen === 'ready') voice('countdown');
     else if (changed && SCREEN_VOICE[screen]) voiceOnScreen(SCREEN_VOICE[screen]!);
-  }, [screen, status, expired]);
+  }, [screen, status, expired, quantity]);
   // Session: announce the next angle while the robot moves, then the pose tip.
   const c = useBooth((s) => s.capture);
   const angles = useBooth((s) => s.session?.plan.angles ?? 0);
@@ -83,13 +88,14 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
       voice(['pose_' + pose, hold], true, undefined, () => setTimeout(() => void api.robotPrepDone(), 300));
     }
   }, [screen, c.phase, c.angle, c.shot]);
-  // Welcome invite repeats every 15s, only while the welcome page is up.
+  // Welcome attract voice: 3s after the page shows, then every WELCOME_IDLE_MS.
   useEffect(() => {
     if (screen !== 'welcome') return;
-    const say = () => currentScreen(get()) === 'welcome' && !get().entering && voice('welcome_idle');
-    say();
-    const t = setInterval(say, 15000);
+    const play = () => !get().entering && voice('welcome_idle');
+    const first = setTimeout(play, 3000);
+    const t = setInterval(play, WELCOME_IDLE_MS);
     return () => {
+      clearTimeout(first);
       clearInterval(t);
       hush('welcome_idle');
     };
@@ -134,7 +140,7 @@ function FloatingRobotHost() {
 }
 
 /** Admin Free Mode zeroes package prices: booth shows the free pay page. */
-const isFree = (s: BoothState) => s.config?.pricing.firstPrint === 0;
+const isFree = (s: BoothState) => isFreeMode(s.config);
 
 const SCREENS: Record<BoothScreen, () => JSX.Element> = {
   welcome: Welcome,
@@ -169,9 +175,6 @@ function useTimer() {
         since = Date.now();
       }
       const show = (timer: BoothState['timer']) => (s.timer?.left !== timer?.left || s.timer?.mode !== timer?.mode) && set({ timer });
-      if ((scr === 'ready' || scr === 'session') && s.deadline) {
-        return show({ left: Math.max(0, Math.ceil((s.deadline - Date.now()) / 1000)), mode: scr === 'ready' ? 'ready' : 'est' });
-      }
       const st = s.session?.status;
       const limit =
         scr === 'pay' && st && UNPAID_STATES.has(st)
@@ -237,7 +240,7 @@ function Timer() {
     <>
     {banner && screen !== 'ready' && screen !== 'session' ? <div className="timeout-banner" role="status">{banner}</div> : null}
     <div className={`timer ${mode === 'limit' && left <= warn ? 'warn' : ''}`} data-testid="timer" role="timer" aria-live="off">
-      ⏱ {mode === 'est' ? (left > 0 ? `± ${mmss(left)}` : 'sebentar lagi') : mmss(left)}
+      ⏱ {mmss(left)}
     </div>
     </>
   );

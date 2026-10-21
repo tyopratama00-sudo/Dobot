@@ -60,7 +60,8 @@ test('complete customer journey: Welcome → Pay → Session → Review → Fram
   // Edit
   await screen(page, 'edit');
   await page.getByTestId('filter-warm').click();
-  await page.getByTestId('tool-rotate').click();
+  await page.getByTestId('sticker-add-rb_wave').click();
+  await expect(page.getByTestId('sticker-remove')).toBeVisible();
   await page.getByTestId('tool-bright-up').click();
   await page.getByTestId('slot-2').click();
   await expect(page.getByTestId('edit-chip')).toContainText('foto 3 dari 4');

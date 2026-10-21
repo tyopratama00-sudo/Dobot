@@ -1,7 +1,6 @@
 import { memo, useMemo, type CSSProperties, type ReactNode } from 'react';
 import QRCode from 'qrcode';
 import { iconSvg, robotSvg, posedRobotSvg, qrModulesSvg, type IconName, type RobotMood } from '@photobooth/ui';
-import { TIP_CATEGORY_COLORS, type PoseTip } from '@photobooth/shared';
 import { useBooth } from '../store';
 
 /** Raw SVG markup (prototype generators) rendered without a layout wrapper. */
@@ -60,19 +59,6 @@ export function Bubble({ children, small, style }: { children: ReactNode; small?
     <div className="bub" style={style}>
       {children}
       {small ? <small>{small}</small> : null}
-    </div>
-  );
-}
-
-/** prototype tipCard(tip, animate) */
-export function TipCard({ t, animate }: { t: PoseTip; animate?: boolean }) {
-  return (
-    <div className={`card ${animate ? 'tip' : ''}`} style={{ width: '100%', padding: '24px 30px' }}>
-      <span className="chip" style={{ height: 46, fontSize: 24, letterSpacing: '.14em', padding: '0 20px', background: TIP_CATEGORY_COLORS[t[0]], boxShadow: 'none', border: 0 }}>
-        {t[0]}
-      </span>
-      <div style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.1, margin: '14px 0 6px' }}>{t[1]}</div>
-      <div style={{ fontSize: 28, color: 'var(--mu)', lineHeight: 1.25 }}>{t[2]}</div>
     </div>
   );
 }

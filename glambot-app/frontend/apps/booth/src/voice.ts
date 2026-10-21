@@ -26,6 +26,9 @@ export async function loadAudioUploads() {
 export const audioUrl = (name: string) =>
   uploads[name] ? `/storage/audio/booth/${name}.mp3?v=${uploads[name]}` : `${import.meta.env.BASE_URL}audio/${name}.mp3`;
 
+export const printDoneCue = (quantity: number) => quantity > 0 ? 'print_done' : null;
+export const paymentQrCue = (freeMode: boolean) => freeMode ? null : 'pay_show';
+
 function play(cue: Cue) {
   if (cue.when && !cue.when()) return next();
   const uploaded = !!uploads[cue.name];

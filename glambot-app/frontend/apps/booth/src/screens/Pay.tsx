@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { priceFor, rp } from '@photobooth/shared';
-import { useBooth } from '../store';
-import { Bubble, Icon, QrCode, Robot, Steps } from '../components/basics';
-import { announcePaymentMethods, announceVoucherEntry, applyFreeVoucher, backFromPay, retryPayment, selectQrPayment, setDigital, setQty } from '../flow';
-import { puffs } from '../robot/floating';
+import { scaleMs, useBooth } from '../store';
+import { Bubble, Icon, QrCode, Steps } from '../components/basics';
+import { announcePaymentMethods, announceVoucherEntry, applyFreeVoucher, backFromPay, PAID_HOLD_MS, retryPayment, selectQrPayment, setDigital, setQty } from '../flow';
 
-type PayPhase = 'wait' | 'transitioning' | 'ok';
 type PayStage = 'select' | 'payment';
 
 const KEYS = '1234567890QWERTYUIOPASDFGHJKLZXCVBNM';
@@ -24,6 +22,41 @@ function useNow(ms = 1000) {
   return now;
 }
 
+/** Paid ticket: green stub (check + LUNAS) | perforation | details + stamp, then a bar until the session begins. */
+function PaySuccess({ label, method, amount, code, paidAt }: { label: string; method: string; amount: number; code: string; paidAt: string | null }) {
+  const at = new Date(paidAt ?? Date.now()).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <div className="paid" role="status">
+      <div className="paid-ticket" data-testid="pay-ok">
+        <div className="paid-card">
+        <div className="paid-stub">
+          <svg viewBox="0 0 52 52" aria-hidden>
+            <circle cx="26" cy="26" r="23" pathLength={1} />
+            <path d="M15 27l7 7 15-16" pathLength={1} />
+          </svg>
+          <b>LUNAS</b>
+          {code ? <small>#{code}</small> : null}
+        </div>
+        <div className="paid-body">
+          <small>Pembayaran berhasil</small>
+          <strong>{rp(amount)}</strong>
+          <dl>
+            <dt>Paket</dt><dd>{label}</dd>
+            <dt>Metode</dt><dd>{method}</dd>
+            <dt>Waktu</dt><dd>{at}</dd>
+          </dl>
+        </div>
+        </div>
+        <span className="paid-stamp" aria-hidden>LUNAS</span>
+      </div>
+      <div className="paid-next">
+        <i style={{ animationDuration: `${scaleMs(PAID_HOLD_MS)}ms` }} />
+        <span>Robot bersiap, sesi foto segera dimulai…</span>
+      </div>
+    </div>
+  );
+}
+
 /** prototype V.pay — quantity, price, real dynamic QRIS, payment states */
 export function Pay() {
   const session = useBooth((s) => s.session)!;
@@ -35,7 +68,6 @@ export function Pay() {
   const payError = useBooth((s) => s.payError);
   const busy = useBooth((s) => s.busy);
   const now = useNow();
-  const [phase, setPhase] = useState<PayPhase>('wait');
   // Resume after reload: a live QR or paid session opens straight on the payment stage.
   const [stage, setStage] = useState<PayStage>(() =>
     session.status === 'PAYMENT_SUCCESS' || session.payment?.status === 'PENDING' ? 'payment' : 'select',
@@ -50,7 +82,6 @@ export function Pay() {
     setVoucherCode((c) => f(c).slice(0, 20));
     setVoucherError(null);
   };
-  const asapRef = useRef<HTMLDivElement>(null);
   const st = session.status;
   const pay: 'wait' | 'ok' | 'fail' = st === 'PAYMENT_SUCCESS' ? 'ok' : st === 'PAYMENT_FAILED' || (payError && !payBusy) ? 'fail' : 'wait';
   const payment = session.payment && session.payment.status === 'PENDING' ? session.payment : null;
@@ -58,25 +89,6 @@ export function Pay() {
   const left = payment ? Math.max(0, Math.floor((new Date(payment.expiresAt).getTime() - now) / 1000)) : 0;
   const expired = session.payment?.status === 'EXPIRED';
 
-  useEffect(() => {
-    if (pay === 'ok' && phase === 'wait') setPhase('transitioning');
-  }, [pay, phase]);
-
-  // Robot emerges from smoke inside the QR box: thick puffs cover it at once and
-  // thin out, a second wave hugs the bottom so the feet clear last.
-  useEffect(() => {
-    if (phase !== 'transitioning') return;
-    const el = asapRef.current;
-    if (el) {
-      const w = el.clientWidth;
-      const h = el.clientHeight;
-      puffs(el, w, h, 11, { size: [w * 0.45, w * 0.7], drift: 0.25, spread: 0, life: 2300, cls: 'puff thick' });
-      puffs(el, w, h, 8, { size: [w * 0.35, w * 0.55], y: [0.6, 0.95], drift: 0.3, spread: 0.6, life: 2300, cls: 'puff soft' });
-    }
-    const t = setTimeout(() => setPhase('ok'), 2400);
-    return () => clearTimeout(t);
-  }, [phase]);
-  const done = phase !== 'wait';
   const digital = qty === 0;
   const locked = pay === 'ok' || voucherUsed;
   // ponytail: digital = package base_price (backend: base + 0 × print_unit_price). Add packages.digital_price if it must differ.
@@ -85,8 +97,6 @@ export function Pay() {
   const total = payment || pay === 'ok' ? session.amount : listPrice;
   const voucherFree = voucherUsed && session.amount === 0;
   const urgent = qrReady && left > 0 && left <= 15;
-  // Keep the QR mounted on the paid render before the effect flips phase (no flicker).
-  const inQr = done || pay !== 'fail';
   const changeMethod = stage === 'payment' && (method === 'qris' || method === 'voucher') && pay !== 'ok';
   const goBack = () => {
     if (changeMethod) {
@@ -192,7 +202,7 @@ export function Pay() {
         <div className={`card pay-right ${stage === 'select' ? 'select-stage' : 'payment-stage'} method-${method}`}>
           {stage === 'payment' ? (
           <>
-          <div className="pay-compact-summary" data-avoid><b>{digital ? 'Digital saja' : `${qty} cetak + digital`}</b><span>{rp(total)}</span></div>
+          {pay === 'ok' ? null : <div className="pay-compact-summary" data-avoid><b>{digital ? 'Digital saja' : `${qty} cetak + digital`}</b><span>{rp(total)}</span></div>}
           {pay === 'fail' && method === 'qris' ? (
             <>
               <div className="pill f" data-testid="pay-failed"><Icon n="x" z={34} /> Pembayaran gagal</div>
@@ -246,69 +256,50 @@ export function Pay() {
               <button type="button" className="wide" aria-label="Hapus" onClick={() => typeVoucher((c) => c.slice(0, -1))} disabled={voucherUsed}>⌫</button>
             </div> : null}
             </div>
-          ) : pay === 'ok' || inQr ? (
+          ) : pay === 'ok' ? (
+            <PaySuccess
+              label={digital ? 'Digital saja' : `${qty} cetak + digital`}
+              method={voucherFree ? `Voucher ${voucherChipCode}` : 'QRIS'}
+              amount={session.amount}
+              code={session.code}
+              paidAt={session.paidAt}
+            />
+          ) : pay !== 'fail' ? (
             <>
-              {done ? (
-                <div className="pill s" data-testid="pay-ok">
-                  <Icon n="check" z={34} /> Pembayaran berhasil
-                </div>
-              ) : (
-                <div className={`pill w ${urgent ? 'urgent' : ''} pay-wait-pill`} aria-label="Pembayaran menunggu">
-                  <Icon n="clock" z={27} />
-                  {qrReady && left > 0 ? <span className="tm">{String(Math.floor(left / 60)).padStart(2, '0')}:{String(left % 60).padStart(2, '0')}</span> : <span>Siapkan e-wallet kamu</span>}
-                </div>
-              )}
-              <div className="pay-qrwrap" data-testid={!done ? 'pay-waiting' : undefined}>
+              <div className={`pill w ${urgent ? 'urgent' : ''} pay-wait-pill`} aria-label="Pembayaran menunggu">
+                <Icon n="clock" z={27} />
+                {qrReady && left > 0 ? <span className="tm">{String(Math.floor(left / 60)).padStart(2, '0')}:{String(left % 60).padStart(2, '0')}</span> : <span>Siapkan e-wallet kamu</span>}
+              </div>
+              <div className="pay-qrwrap" data-testid="pay-waiting">
               <div className="free-halo" aria-hidden><i /><i /><i /></div>
-              <div className={`qrbox pay-qr ${qrReady || done ? '' : 'busy'} ${done ? '' : 'spin'}`} data-testid="qris" data-avoid>
+              <div className={`qrbox pay-qr spin ${qrReady ? '' : 'busy'}`} data-testid="qris" data-avoid>
                 {voucherFree ? (
-                  <div className={`qrin voucher-paid ${done ? 'gone' : ''}`} aria-label={`Voucher ${voucherChipCode}`}>
+                  <div className="qrin voucher-paid" aria-label={`Voucher ${voucherChipCode}`}>
                     <Icon n="ticket" z={120} />
                     <b>{voucherChipCode}</b>
                   </div>
-                ) : voucherFree ? (
-                  <div className={`qrin voucher-paid ${done ? 'gone' : ''}`} aria-label="Voucher lunas"><Icon n="ticket" z={120} /><b>LUNAS</b></div>
                 ) : (
                   <>
-                    <div className={`qrin ${done ? 'gone' : ''}`}>
-                      {payment || done ? <QrCode text={payment?.qrString ?? session.payment?.qrString ?? ''} size={360} level="Q" /> : <div className="qrskel" />}
+                    <div className="qrin">
+                      {payment ? <QrCode text={payment.qrString} size={360} level="Q" /> : <div className="qrskel" />}
                     </div>
-                    <div className={`qrin ${done ? 'gone' : ''}`} style={{ position: 'absolute', left: '50%', top: '50%', translate: '-50% -50%', background: '#fff', borderRadius: 20, padding: '4px 12px', fontWeight: 700, fontSize: 30 }}>
+                    <div className="qrin" style={{ position: 'absolute', left: '50%', top: '50%', translate: '-50% -50%', background: '#fff', borderRadius: 20, padding: '4px 12px', fontWeight: 700, fontSize: 30 }}>
                       QRIS
                     </div>
                   </>
                 )}
-                {/* layers: robot < fog < smoke, so the smoke covers the robot */}
-                {done ? (
-                  <>
-                    <div className="emerge">
-                      <Robot m="cheer" s={330} />
-                    </div>
-                    <div className="fog" />
-                    <div ref={asapRef} className="asap" />
-                  </>
-                ) : null}
               </div>
               </div>
-              {done ? (
-                <div className="late">
-                  <h2>Lunas</h2>
-                  <p className="p" style={{ marginTop: 8 }}>
-                    Kita mulai sebentar lagi.
-                  </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+                <p className="p" style={{ fontSize: 30 }}>
+                  Scan dengan e-wallet atau m-banking
+                </p>
+                <div className="pay-wallets">
+                  {WALLETS.map((w) => (
+                    <span key={w}>{w}</span>
+                  ))}
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
-                  <p className="p" style={{ fontSize: 30 }}>
-                    Scan dengan e-wallet atau m-banking
-                  </p>
-                  <div className="pay-wallets">
-                    {WALLETS.map((w) => (
-                      <span key={w}>{w}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
+              </div>
             </>
           ) : (
             <>

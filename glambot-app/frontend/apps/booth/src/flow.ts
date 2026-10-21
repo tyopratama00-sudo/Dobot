@@ -21,8 +21,13 @@ import {
 import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api/client';
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
-import { clipSeconds, loadAudioUploads, voice } from './voice';
-import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, sessionEnd, set, type BoothState } from './store';
+import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
+import { MAX_STICKERS, type Sticker } from './stickers';
+import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
+import { timeoutAction } from './timeout-flow';
+
+/** How long the paid ticket stays up before the session begins. */
+export const PAID_HOLD_MS = 4000;
 
 /* ------------------------------------------------------------------ abort token (prototype `tok`) */
 
@@ -216,7 +221,7 @@ function onEnterState(prevStatus: SessionState | null, next: SessionSnapshot, pa
         setTimeout(() => {
           beginScheduled = false;
           if (t === tok) beginAfterPayment();
-        }, scaleMs(2800));
+        }, scaleMs(PAID_HOLD_MS));
       }
       break;
     case 'READY':
@@ -384,7 +389,8 @@ function pickQty(q: number) {
 
 export function selectQrPayment() {
   if (get().session?.status !== 'PAYMENT_SUCCESS') {
-    voice('pay_show');
+    const cue = paymentQrCue(get().config?.freeMode === true);
+    if (cue) voice(cue);
     void requestPayment(get().qty);
   }
 }
@@ -488,14 +494,13 @@ async function runSession(retakeAngle: number | null) {
   try {
     if (retakeAngle === null) {
       // READY: "Mulai dalam N detik"
-      const total = get().session?.plan.readySeconds ?? cfg.session.readySeconds;
-      set({ readyCd: total });
-      // Stretch the digits to the countdown clip so screen and voice end together.
-      const step = Math.max(900, ((await clipSeconds('countdown')) * 1000) / total);
-      set({ deadline: Date.now() + scaleMs(step * total) });
+      // Real seconds, as many as the countdown clip lasts; admin value only when the clip is missing.
+      const clip = await clipSeconds('countdown');
+      const total = clip > 0 ? Math.ceil(clip) : (get().session?.plan.readySeconds ?? cfg.session.readySeconds);
+      set({ readyCd: total, readyTotal: total });
       for (let cd = total; cd > 0; cd--) {
         set({ readyCd: cd });
-        await wait(step, t);
+        await wait(1000, t);
       }
     }
     await runCapture(t, retakeAngle);
@@ -518,8 +523,7 @@ async function runSession(retakeAngle: number | null) {
 async function runCapture(t: number, retakeAngle: number | null) {
   if (retakeAngle === null) await sendResilient({ type: 'move', angle: 0 }, 30000);
   const started = Date.now();
-  const angles = () => (retakeAngle === null ? plan(get()).angles : 1);
-  set({ deadline: sessionEnd(started, angles(), 0, 0) });
+  // No on-screen timer: the session runs until all angles are shot. This cap only rescues a stuck robot.
   // A retake shoots one pose; cap it well below the full-session limit.
   const limitMs = retakeAngle === null ? api.captureLimitMs : 120000;
   let seenActive = false;
@@ -586,16 +590,14 @@ async function runCapture(t: number, retakeAngle: number | null) {
         const last = get().session!.photos.at(-1)!;
         const doneAngles = new Set(get().session!.photos.map((p) => p.angle)).size;
         const more = retakeAngle === null && doneAngles < total;
-        set({ deadline: sessionEnd(started, angles(), retakeAngle === null ? doneAngles : 1, Date.now()) });
         if (more) nice = (nice + 1 + Math.floor(Math.random() * (NICE.length - 1))) % NICE.length;
         const msg = retakeAngle !== null ? 'Foto baru tersimpan!' : more ? NICE[nice] : 'Mantap! Semua angle selesai.';
-        // Frozen frame stays up while the real photo decodes, so the swap has no blank gap.
-        await preload(last.previewUrl, 3000);
-        if (t !== tok) throw new Aborted();
         snapAt = null;
-        setCapture({ angle, phase: 'nice', cd: null, message: msg, shotUrl: last.previewUrl, freeze: false });
+        // "Nice" shows at once over the frozen frame; the real photo swaps in once decoded (no blank gap).
+        setCapture({ angle, phase: 'nice', cd: null, message: msg });
         voice(retakeAngle !== null ? 'sess_retake_ok' : more ? `sess_nice_${nice + 1}` : 'sess_done');
-        await wait(2000, t);
+        await Promise.all([preload(last.previewUrl, 3000).then(() => t === tok && setCapture({ shotUrl: last.previewUrl, freeze: false })), wait(2000, t)]);
+        if (t !== tok) throw new Aborted();
         setCapture({ shotUrl: null });
         continue;
       }
@@ -679,6 +681,7 @@ export function retake(angle: number) {
   robot.rbNav(`Ulang angle ${p2(angle + 1)}`, 'cam', () => void guard('retake', () => send({ type: 'retake', angle })));
 }
 
+/** "Selesai": end the robot sequence early once the frame's slots can be filled. */
 export function skipSession() {
   captureRunning = false;
   tok++;
@@ -707,7 +710,7 @@ export function chooseTemplate(id: string) {
   const s = get();
   const t = s.config?.templates.find((x) => x.id === id);
   if (!t) return;
-  set({ tplId: id, picks: [], edits: {} });
+  set({ tplId: id, picks: [], edits: {}, stickers: [] });
   void send({ type: 'set_template', templateId: id }).catch(() => undefined);
   const r = t.reaction;
   if (r) robot.react(r.pose, r.anim, r.text, r.fx, 1.7);
@@ -778,6 +781,27 @@ async function flushEdits() {
   if (slots.length) await api.command({ type: 'edits', slots }, { retries: 2 }).catch(() => undefined);
 }
 
+export function addSticker(k: string) {
+  const list = get().stickers;
+  if (list.length >= MAX_STICKERS) {
+    robot.say('Stikernya sudah penuh', 1400);
+    return null;
+  }
+  const o = ((list.length % 5) - 2) * 0.06;
+  const st: Sticker = { id: Date.now(), k, x: 0.5 + o, y: 0.45 + o, s: 0.24 };
+  set({ stickers: [...list, st] });
+  robot.react('cheer', 'hop', 'Lucu!', null, 1.1);
+  return st.id;
+}
+
+export function updateSticker(id: number, p: Partial<Sticker>) {
+  set({ stickers: get().stickers.map((s) => (s.id === id ? { ...s, ...p } : s)) });
+}
+
+export function removeSticker(id: number) {
+  set({ stickers: get().stickers.filter((s) => s.id !== id) });
+}
+
 export function editOp(op: EditOp) {
   const s = get();
   const e = applyEditOp(editOf(s.slot), op);
@@ -825,13 +849,20 @@ export function onIdleTimeout() {
   const st = s.session?.status;
   if (!st) return;
   if (st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();
-  if (st === 'FRAME_SELECTION') return confirmTemplate();
-  if (['REVIEW', 'PHOTO_SELECTION', 'EDITING'].includes(st))
-    return void guard('auto', async () => {
-      await flushEdits();
-      await send({ type: 'auto_complete' });
-    });
-  if (st === 'FINAL_PREVIEW') return void guard('auto', () => send({ type: 'confirm' }));
+  switch (timeoutAction(st)) {
+    case 'choose-frame': return toFrames();
+    case 'confirm-frame': return confirmTemplate();
+    case 'auto-pick':
+      autoPick();
+      return confirmPicks();
+    case 'finish-edit': return editDone();
+    case 'confirm-output': return void guard('auto', () => send({ type: 'confirm' }));
+    case 'auto-complete':
+      return void guard('auto', async () => {
+        await flushEdits();
+        await send({ type: 'auto_complete' });
+      });
+  }
   if (st === 'QR_READY') return finish();
   if (st === 'FINISHED' || st === 'ERROR') return resetToWelcome();
 }
@@ -857,6 +888,7 @@ export function resetToWelcome() {
     tplId: DEFAULT_TEMPLATE_ID,
     picks: [],
     edits: {},
+    stickers: [],
     slot: 0,
     capture: { angle: 0, shot: 0, phase: '', message: '' },
     big: null,
@@ -864,7 +896,6 @@ export function resetToWelcome() {
     notice: null,
     clientError: null,
     timer: null,
-    deadline: null,
     readyCd: get().config?.session.readySeconds ?? 5,
   });
   void refreshHealth();

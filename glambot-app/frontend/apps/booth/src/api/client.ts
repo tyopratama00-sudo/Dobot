@@ -17,6 +17,8 @@ import {
   type SessionState,
 } from '@photobooth/shared';
 import { composeFrame } from '../compose';
+// ponytail: stickers live only in the booth store (not the session snapshot), so a booth reload drops them; add to SlotDTO/session if needed.
+import { get } from '../store';
 
 /**
  * Booth ↔ glambot adapter. The booth UI keeps talking in SessionSnapshots and
@@ -137,6 +139,7 @@ interface GoTx { midtrans_order_id: string; status: string; qris_raw_string?: st
 interface GoPhoto { id: string; url?: string; file_path: string; created_at: string }
 /** GET /api/config (backend/handlers/config.go timerConfig). */
 interface AppConfig {
+  freeMode?: boolean;
   voucherChipEnabled?: boolean;
   voucherChipCode?: string;
   freeDigitalOnly?: boolean;
@@ -154,6 +157,7 @@ interface GoFrame {
   slots: { x: number; y: number; width: number; height: number; shape: string }[] | null;
 }
 export interface RobotDetection {
+  present?: boolean;
   fsm_state?: 'IDLE' | 'MOVING' | 'TRACKING' | 'CAPTURING' | 'DONE';
   sequence?: { index: number; total: number; seconds_left: number; complete: boolean };
 }
@@ -285,6 +289,7 @@ class Api {
       timingScale: 1,
       devTools: false,
       mockPayment: paymentConfig.test_payment_enabled,
+      freeMode: appConfig.freeMode === true,
       voucherChip: appConfig.voucherChipEnabled !== false,
       voucherChipCode: appConfig.voucherChipCode || 'FREE FOTO',
       freeDigitalOnly: appConfig.freeDigitalOnly === true,
@@ -658,7 +663,7 @@ class Api {
       const slots = [...s.slots].sort((a, b) => a.slotIndex - b.slotIndex);
       const photos = slots.map((x) => s.photos.find((p) => p.id === x.photoId));
       const edits = Object.fromEntries(slots.map((x) => [x.slotIndex, x.edit]));
-      const blob = await composeFrame(t, photos, edits);
+      const blob = await composeFrame(t, photos, edits, get().stickers);
       const form = new FormData();
       form.append('image', blob, 'strip.jpg');
       form.append('sessionId', goId);
@@ -670,7 +675,7 @@ class Api {
       if (!alive()) return;
       // Resolved alongside printing so the QR screen usually opens without waiting.
       links = galleryLinks(goId, composed?.preview_url);
-      this.emit({ status: 'PRINTING', print: { ...this.snap!.print!, status: 'PRINTING', progress: 30 } });
+      if (this.snap!.quantity > 0) this.emit({ status: 'PRINTING', print: { ...this.snap!.print!, status: 'PRINTING', progress: 30 } });
     } catch (e) {
       if (alive()) this.emit({ status: 'ERROR', print: { ...this.snap!.print!, status: 'FAILED', error: (e as Error).message, userMessage: 'Gagal menyimpan foto.' } });
       return;
@@ -679,8 +684,10 @@ class Api {
       // Digital only: backend prints print_count 0 as 1 copy, so never call it.
       if (this.snap!.quantity > 0) await go('POST', '/api/photo/print', { session_id: goId }, undefined, 60000);
       if (!alive()) return;
-      this.emit({ status: 'PRINT_SUCCESS', print: { ...this.snap!.print!, status: 'COMPLETED', progress: 100 } });
-      await sleep(this.snap!.quantity > 0 ? 2500 : 800);
+      if (this.snap!.quantity > 0) {
+        this.emit({ status: 'PRINT_SUCCESS', print: { ...this.snap!.print!, status: 'COMPLETED', progress: 100 } });
+        await sleep(2500);
+      }
     } catch (e) {
       if (!alive()) return;
       const msg = (e as Error).message;

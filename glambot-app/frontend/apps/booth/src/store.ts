@@ -13,8 +13,10 @@ import {
   type PhotoTemplate,
   type SessionSnapshot,
 } from '@photobooth/shared';
+import type { Sticker } from './stickers';
+import { outputScreen } from './output-screen';
 
-export type CapturePhase = 'move' | 'prep' | 'cd' | 'shooting' | 'nice' | 'retry' | '';
+export type CapturePhase = 'move' | 'prep' | 'cd' | 'nice' | '';
 
 export interface HealthState {
   acceptingSessions: boolean;
@@ -46,26 +48,19 @@ export interface BoothState {
   tplId: string;
   picks: string[];
   edits: Record<number, EditParams>;
+  /** Decorations on the frame (edit screen); local only, burned into the composed image. */
+  stickers: Sticker[];
   slot: number;
   capture: { angle: number; shot: number; phase: CapturePhase; message: string; cd?: number | 'cam' | 'snap' | null; cdKey?: number; flashKey?: number; shotUrl?: string | null; freeze?: boolean; prepEnd?: number };
   readyCd: number;
+  /** Start value of the ready countdown (clip length), for the progress bar. */
+  readyTotal: number;
   big: string | null;
   busy: string | null;
   notice: string | null;
   clientError: { code: string; message: string } | null;
-  /** On-screen timer: `limit` = page time limit, `ready` = ready countdown, `est` = estimated photo-session end. */
-  timer: { left: number; mode: 'limit' | 'ready' | 'est' } | null;
-  /** End time (ms) of the ready page / estimated end of the photo session. */
-  deadline: number | null;
-}
-
-/** Robot time per angle before any angle finished (move ~3s + audio-driven prep ~8.5 + 3-2-1 3 + after-shot 2.5). */
-export const ANGLE_MS = 17000;
-
-/** Estimated photo-session end: average real angle time once one is done, else ANGLE_MS. */
-export function sessionEnd(started: number, total: number, done: number, lastDoneAt: number) {
-  const per = done ? (lastDoneAt - started) / done : ANGLE_MS;
-  return started + per * total;
+  /** On-screen page time limit (none on the ready/session screens). */
+  timer: { left: number; mode: 'limit' } | null;
 }
 
 export const useBooth = create<BoothState>(() => ({
@@ -87,15 +82,16 @@ export const useBooth = create<BoothState>(() => ({
   tplId: DEFAULT_TEMPLATE_ID,
   picks: [],
   edits: {},
+  stickers: [],
   slot: 0,
   capture: { angle: 0, shot: 0, phase: '', message: '' },
   readyCd: 5,
+  readyTotal: 5,
   big: null,
   busy: null,
   notice: null,
   clientError: null,
   timer: null,
-  deadline: null,
 }));
 
 export const set = useBooth.setState;
@@ -109,7 +105,7 @@ export function currentScreen(s: BoothState, now = Date.now()): BoothScreen {
   if (!sess) return 'welcome';
   if (s.entering) return 'welcome';
   if (now < s.holdPrintUntil) return 'print';
-  return screenForState(sess.status);
+  return outputScreen(sess.status, sess.quantity) ?? screenForState(sess.status);
 }
 
 export function templates(s: BoothState): PhotoTemplate[] {

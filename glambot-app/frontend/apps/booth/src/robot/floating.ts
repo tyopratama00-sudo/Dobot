@@ -48,7 +48,7 @@ class FloatingRobot {
   private to: ReturnType<typeof setTimeout> | undefined;
   private F = {
     x: 500, y: 300, vx: 0, vy: 0, tx: 900, ty: 500, t: 0, pause: 0, pose: '', sz: 0, n: 0, on: false, l: 0,
-    u: 0, dir: 1, dash: 0, busy: 0, edge: 0,
+    dash: 0, busy: 0, edge: 0,
   };
   private sessionPose = 'grin';
 
@@ -95,15 +95,15 @@ class FloatingRobot {
     this.rob.style.display = F.on ? 'block' : 'none';
     if (!F.on) return;
     if (screen === 'pay' && previous !== 'pay') this.say('Pilih paketmu!', 3200);
-    const sz = screen == 'ready' || screen == 'session' ? 300 : 220;
+    const sz = screen == 'ready' || screen == 'session' ? 200 : 220;
     this.setPose(screen == 'ready' ? 'wave' : screen == 'session' ? this.sessionPose : F.pose && F.pose != 'cam' ? F.pose : 'grin', sz);
     const eg = screen == 'session' || screen == 'ready';
     if (eg && !F.edge) {
       F.edge = 1;
-      if (F.x > 300 && F.x < 1300 && F.y > 150 && F.y < 700) {
-        F.x = -380;
-        F.vx = 1200;
-        F.y = 300;
+      if (F.x < 1300) {
+        F.x = 2100;
+        F.vx = -1200;
+        F.y = 200;
       }
       F.t = 0;
     }
@@ -230,17 +230,15 @@ class FloatingRobot {
 
   // -------------------------------------------------------------- movement
 
-  private per(u: number): [number, number] {
+  /** Capture screens: park centred in the studio column's [data-dock] box, clear of camera and countdown. */
+  private dock(): [number, number] {
     const F = this.F;
-    const X0 = 8, X1 = 1920 - F.sz - 8, Y0 = 70, Y1 = 1080 - F.sz - 30, W = X1 - X0, H = Y1 - Y0;
-    let d = u * 2 * (W + H);
-    if (d < W) return [X0 + d, Y0];
-    d -= W;
-    if (d < H) return [X1, Y0 + d];
-    d -= H;
-    if (d < W) return [X1 - d, Y1];
-    d -= W;
-    return [X0, Y1 - d];
+    const el = this.stage?.querySelector<HTMLElement>('[data-dock]');
+    if (!el || !this.stage) return [1920 - F.sz - 40, 160];
+    const sr = this.stage.getBoundingClientRect();
+    const k = sr.width / 1920 || 1;
+    const r = el.getBoundingClientRect();
+    return [(r.left - sr.left) / k + (r.width / k - F.sz) / 2, (r.top - sr.top) / k + (r.height / k - F.sz * 1.05) / 2];
   }
 
   /** Stage-space rectangles the robot should not park on (safe zones). */
@@ -299,9 +297,8 @@ class FloatingRobot {
         if (F.t <= 0) {
           F.t = 2.4 + Math.random() * 2.2;
           if (this.screen == 'session' || this.screen == 'ready') {
-            F.u = (F.u + F.dir * (0.05 + Math.random() * 0.08) + 1) % 1;
-            if (Math.random() < 0.2) F.dir *= -1;
-            const q = this.per(F.u);
+            F.t = 0.5;
+            const q = this.dock();
             F.tx = q[0];
             F.ty = q[1];
           } else {

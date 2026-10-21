@@ -119,6 +119,18 @@ test('admin upload plays first; a missing upload falls back to the built-in clip
   last.end();
 });
 
+test('free payment flow does not announce QR scanning', async () => {
+  const { paymentQrCue } = await import('./voice');
+  expect(paymentQrCue(true)).toBeNull();
+  expect(paymentQrCue(false)).toBe('pay_show');
+});
+
+test('digital-only session has no print completion cue', async () => {
+  const { printDoneCue } = await import('./voice');
+  expect(printDoneCue(0)).toBeNull();
+  expect(printDoneCue(1)).toBe('print_done');
+});
+
 test('shutter cue waits for final countdown word', async () => {
   const { voice } = await import('./voice');
   played.length = 0;
