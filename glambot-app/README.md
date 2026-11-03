@@ -1160,6 +1160,20 @@ Edge case yang dihandle: kalau halaman refresh tepat saat `sessionTimeLeft` suda
 
 ---
 
+## Tes yang menulis ke database
+
+Tes migrasi dan Mode Gratis memakai schema sekali pakai di database terpisah, dan dilewati kalau `TEST_DATABASE_URL` belum diset. Nama database wajib berakhiran `_test`, jadi tes ini tidak bisa berjalan di database booth.
+
+```bash
+psql -U postgres -c "CREATE DATABASE photobooth_test"
+cd backend
+TEST_DATABASE_URL="postgres://USER:PASS@localhost:5432/photobooth_test?sslmode=disable"   go test ./database/... ./handlers -run "Fresh|AdminZero|FreeModeSurvives|FreeModeBefore|CreateSession|RestartHeals|RestartKeeps"
+```
+
+`TestFreeModeRoundTrip` (`handlers/free_mode_test.go`) dan `admin_extra_test.go` masih memakai database dari `backend/.env` dan mengubah datanya sementara. Jangan jalankan `go test ./handlers` tanpa `-run` di booth yang sedang dipakai.
+
+---
+
 ## Testing dengan curl
 
 ### Setup session untuk testing

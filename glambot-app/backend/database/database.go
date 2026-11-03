@@ -135,12 +135,6 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		// kode). Sessions menyimpan snapshot harganya saat sesi dibuat.
 		`ALTER TABLE packages ADD COLUMN IF NOT EXISTS print_unit_price INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS print_unit_price INTEGER NOT NULL DEFAULT 0`,
-		// Backfill perilaku lama (vip = 15000/cetak) HANYA jika belum ada paket
-		// yang dikonfigurasi harga cetaknya — sekali jalan, tidak menimpa
-		// pengaturan admin pada boot berikutnya.
-		`UPDATE packages SET print_unit_price = 15000
-		   WHERE code = 'vip'
-		     AND NOT EXISTS (SELECT 1 FROM packages WHERE print_unit_price <> 0)`,
 
 		// Frames: UI admin butuh frame_code, category, description, file_size.
 		`ALTER TABLE frames ADD COLUMN IF NOT EXISTS frame_code TEXT NOT NULL DEFAULT ''`,
@@ -171,6 +165,26 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 			value TEXT NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+
+		// Backfill perilaku lama (vip = 15000/cetak) untuk instalasi baru. Migrasi
+		// ini jalan tiap boot, jadi penanda print_price_backfilled yang membuatnya
+		// sekali jalan: harga cetak 0 sesudah itu adalah pilihan admin. Saat Mode
+		// Gratis aktif (free_mode_backup ada) harga 0 itu disengaja, jadi dilewati;
+		// harga aslinya kembali dari backup saat Mode Gratis dimatikan.
+		`UPDATE packages SET print_unit_price = 15000
+		   WHERE code = 'vip'
+		     AND NOT EXISTS (SELECT 1 FROM packages WHERE print_unit_price <> 0)
+		     AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key IN ('print_price_backfilled', 'free_mode_backup'))`,
+		`INSERT INTO app_settings (key, value) VALUES ('print_price_backfilled', '1')
+		   ON CONFLICT (key) DO NOTHING`,
+		// Pulihkan paket yang terlanjur punya harga selama Mode Gratis (dulu backfill
+		// di atas menaikkan vip setiap restart). Hanya paket yang ada di backup: paket
+		// lain belum punya salinan harga, jadi harganya tidak boleh dihapus.
+		`UPDATE packages SET base_price = 0, print_unit_price = 0, updated_at = NOW()
+		   WHERE (base_price <> 0 OR print_unit_price <> 0)
+		     AND id::text IN (
+		       SELECT json_object_keys(value::json) FROM app_settings WHERE key = 'free_mode_backup'
+		     )`,
 
 		// Master script audio booth (diedit admin). File: storage/audio/booth/<id>.mp3.
 		`CREATE TABLE IF NOT EXISTS audio_scripts (

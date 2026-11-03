@@ -22,6 +22,7 @@ import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
 import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
+import { freeModeOutdated } from './payment-mode';
 import { MAX_STICKERS, type Sticker } from './stickers';
 import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
 import { timeoutAction } from './timeout-flow';
@@ -352,6 +353,17 @@ async function requestPayment(q: number) {
     const st = get().session?.status;
     if (st === 'PAYMENT_FAILED') await send({ type: 'retry_payment' });
     const snap = await api.payment(q);
+    if (freeModeOutdated(get().config, snap.status)) {
+      applySnapshot(api.abandonPayment());
+      set({ payBusy: false, payError: 'Pengaturan harga baru saja berubah. Coba lagi, ya.' });
+      voice('pay_busy');
+      // New config moves the customer off the free page when Free Mode really is off.
+      void api
+        .config()
+        .then((config) => get().session && set({ config: { ...config, timingScale: get().config?.timingScale ?? config.timingScale } }))
+        .catch(() => undefined);
+      return;
+    }
     applySnapshot(snap);
     if (get().qty === q) set({ payBusy: false });
   } catch (e) {

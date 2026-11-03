@@ -76,6 +76,18 @@ func CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings, err := readAppSettings(keyFreeModeBackup, keyFreeDigitalOnly)
+	if err != nil {
+		respondInternal(w, "read free mode", err)
+		return
+	}
+	// Mode Gratis: sesi selalu Rp0 walau tabel paket tidak konsisten, karena
+	// halaman booth Mode Gratis tidak punya tampilan QRIS untuk membayar.
+	if _, freeMode := settings[keyFreeModeBackup]; freeMode {
+		pkgInfo.Price = 0
+		pkgInfo.PrintUnitPrice = 0
+	}
+
 	printUnitPrice := pkgInfo.PrintUnitPrice
 
 	printCount := req.PrintCount
@@ -90,10 +102,7 @@ func CreateSession(w http.ResponseWriter, r *http.Request) {
 	// Paket gratis: cetak dikunci 1 lembar supaya tidak bisa diakali lewat API.
 	if pkgInfo.Price == 0 && printUnitPrice == 0 {
 		printCount = 1
-		if settings, err := readAppSettings(keyFreeDigitalOnly); err != nil {
-			respondInternal(w, "read free mode output", err)
-			return
-		} else if settings[keyFreeDigitalOnly] == "1" {
+		if settings[keyFreeDigitalOnly] == "1" {
 			printCount = 0
 		}
 	}

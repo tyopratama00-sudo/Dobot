@@ -400,6 +400,14 @@ class Api {
     return snap;
   }
 
+  /** Drop the pending QR but keep the booth session, so the customer can try again. */
+  abandonPayment(): SessionSnapshot {
+    this.stopPoll();
+    this.paySeq++;
+    this.expireGo();
+    return this.emit({ status: 'SELECT_PRINT', payment: null });
+  }
+
   async applyFreeVoucher(code: string, quantity: number): Promise<SessionSnapshot> {
     if (!this.snap || !this.pkg || !UNPAID.includes(this.st)) throw new ApiError(409, 'INVALID_TRANSITION', 'Voucher hanya bisa dipakai sebelum pembayaran');
     const sessionId = await go<GoSession>('POST', '/api/session/create', { packageId: this.pkg.id, printCount: quantity }).then((s) => s.id);
