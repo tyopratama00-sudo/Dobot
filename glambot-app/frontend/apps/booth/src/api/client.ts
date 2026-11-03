@@ -159,6 +159,8 @@ interface GoFrame {
 export interface RobotDetection {
   present?: boolean;
   fsm_state?: 'IDLE' | 'MOVING' | 'TRACKING' | 'CAPTURING' | 'DONE';
+  /** Robot stopped on its own (emergency stop, failed move, failed enable): nothing more will be shot. */
+  session_stopped?: boolean;
   sequence?: { index: number; total: number; seconds_left: number; complete: boolean };
 }
 export interface RobotConfig { current_preset: number; auto_capture_active: boolean; auto_capture_remaining_ms: number }

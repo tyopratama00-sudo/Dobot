@@ -1,5 +1,4 @@
 import time
-import threading
 import cv2
 from flask import Flask, Response, jsonify, request, send_from_directory
 
@@ -62,6 +61,7 @@ def create_app(runtime):
         offset = d.get("offset")
         return jsonify({
             "session_active":  runtime.session_active,
+            "session_stopped": runtime.session_stopped,
             "face_detected":   face,
             "face_offset":     ({"x": round(offset[0], 4), "y": round(offset[1], 4)}
                                 if face and offset else None),
@@ -172,84 +172,18 @@ def create_app(runtime):
         if any(x < 1 or x > total for x in only):
             return jsonify({"error": f"only di luar 1..{total}"}), 400
 
-        # Dry-run (--no-robot): tidak ada hardware untuk di-enable/home. Cukup
-        # buka session supaya sequence bisa dites dari Monitor 2.
-        if runtime.dry_run:
-            runtime.session_active = True
-            runtime.notify_session_started(only)
-            print("  [SESSION] ✓ Started (dry-run)")
-            return jsonify({"status": "enabled", "message": "Dry-run session active"})
-
-        if not runtime.robot or not runtime.robot.connected:
-            return jsonify({"error": "not connected"}), 503
-        if runtime.robot.enabled:
-            if not runtime.session_active:
-                # /robot/disable masih pulang-lalu-mati di thread-nya; coba lagi sebentar.
-                return jsonify({"error": "robot sedang dimatikan, coba lagi"}), 409
-            return jsonify({"status": "already_enabled"})
-
-        def _enable_and_home():
-            if runtime.robot.initialize():
-                runtime.robot.enabled = True
-                runtime.session_active = True
-                print("  [ROBOT] Moving to initial pose after enable...")
-                runtime.robot.move_to_initial_pose(runtime.presets)
-                runtime.robot.wait_until_idle(timeout=runtime.config.safety_timeout)
-                # Verifikasi current_preset ke posisi FISIK (anti state basi kalau
-                # robot sempat digerakkan manual lewat Dobot Studio).
-                runtime.robot.sync_current_preset(runtime.presets)
-                print("  [ROBOT] ✓ At initial pose")
-                print("  [SESSION] ✓ Started")
-                # Sequence baru jalan SETELAH homing selesai — kalau dimulai lebih
-                # awal, gerak ke pose 1 akan bertabrakan dengan gerak homing.
-                runtime.notify_session_started(only)
-
-        threading.Thread(target=_enable_and_home, daemon=True, name="robot_enable").start()
-        return jsonify({
-            "status":  "enabling",
-            "message": "Robot diaktifkan, homing, lalu sequence pose otomatis dimulai",
-        })
+        body, status = runtime.request_enable(only)
+        return jsonify(body), status
 
     @app.route("/robot/disable", methods=["POST"])
     def api_robot_disable():
-        # Dry-run (--no-robot): cukup tutup session (tanpa home/servo-off nyata).
-        if runtime.dry_run:
-            runtime.session_active = False
-            runtime.stop_session()
-            print("  [SESSION] ✓ Ended (dry-run)")
-            return jsonify({"status": "disabled", "message": "Dry-run session ended"})
-
-        if not runtime.robot or not runtime.robot.connected:
-            return jsonify({"error": "not connected"}), 503
-        if not runtime.robot.enabled:
-            return jsonify({"status": "already_disabled"})
-
-        # Hentikan sequence & tracking DULU, baru pulang — supaya tidak ada
-        # perintah tracking yang menyusul setelah gerak homing dimulai.
-        runtime.session_active = False
-        runtime.stop_session()
-        print("  [SESSION] ✓ Ended")
-
-        def _home_and_disable():
-            print("  [ROBOT] Returning to initial pose before disable...")
-            runtime.robot.move_to_initial_pose(runtime.presets)
-            runtime.robot.wait_until_idle()   # off as soon as the home move finishes
-            runtime.robot.disable()
-            print("  [ROBOT] ✓ Disabled")
-
-        threading.Thread(target=_home_and_disable, daemon=True, name="robot_disable").start()
-        return jsonify({
-            "status":  "disabling",
-            "message": "Robot kembali ke initial pose lalu langsung dimatikan",
-        })
+        body, status = runtime.request_disable()
+        return jsonify(body), status
 
     @app.route("/robot/stop", methods=["POST"])
     def api_robot_stop():
-        if runtime.robot and runtime.robot.connected:
-            runtime.stop_session()
-            runtime.robot.stop()
-            return jsonify({"status": "stopped"})
-        return jsonify({"error": "not connected"}), 503
+        body, status = runtime.request_stop()
+        return jsonify(body), status
 
     @app.route("/robot/preset", methods=["POST"])
     def api_robot_preset():
@@ -319,6 +253,7 @@ def create_app(runtime):
             "current_preset":      getattr(runtime.robot, "current_preset", None),
             "capture_in_progress": runtime.capture_in_progress,
             "fsm_state":           runtime.fsm_state,
+            **runtime.mode_status(),
         })
 
     @app.route("/robot/live")

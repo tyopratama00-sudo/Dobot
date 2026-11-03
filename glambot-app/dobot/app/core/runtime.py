@@ -30,6 +30,13 @@ RUNTIME_TUNABLES = {
 # SpeedFactor/SpeedJ/AccJ ke robot lewat set_speed().
 _SPEED_ATTRS = ("robot_speed_factor", "robot_joint_speed", "robot_joint_acc")
 
+# Mode kerja robot, dilaporkan lewat /robot/status.
+MODE_STANDBY   = "standby"
+MODE_ENABLING  = "enabling"
+MODE_ACTIVE    = "active"
+MODE_DISABLING = "disabling"
+MODE_STOPPING  = "stopping"
+
 
 def apply_tunables(config, data: dict) -> set:
     """Clamp & set key tuning yang dikenal pada objek config. Key tak dikenal /
@@ -89,6 +96,20 @@ class Runtime:
 
         self._capture_lock = threading.Lock()
         self._manual_busy  = False
+
+        # ── Mode kerja: enable/disable/stop jalan satu per satu ──
+        # _mode_lock juga dipegang saat mengirim gerak homing, supaya stop yang
+        # datang bersamaan tidak terdahului oleh gerak yang baru dikirim.
+        self._mode_lock      = threading.Lock()
+        self.robot_mode      = MODE_STANDBY
+        self.robot_error     = None
+        self._mode_cancel    = threading.Event()
+        self._stop_requested = False
+        self._mode_worker    = None
+        # Sesi berhenti bukan atas permintaan booth (stop, gagal gerak, gagal
+        # enable). Booth tidak bisa menyimpulkannya dari state sequence: stop
+        # mengembalikannya ke IDLE, sama seperti sesi yang belum mulai.
+        self.session_stopped = False
 
     # ─────────────────────────────────────────────────────────────
     #  Wiring detector → tracker
@@ -152,25 +173,15 @@ class Runtime:
             self.robot.move_to_joints = fake_move
             return
 
+        # Service bisa start tanpa ada yang mengawasi, jadi di sini hanya connect.
+        # Gerak pertama baru terjadi saat /robot/enable.
         print(f"\n  Connecting to Dobot Nova at {cfg.dobot_ip}...")
         if not self.robot.connect():
-            print("  Running in vision-only mode (robot offline)")
+            print("  Robot offline — vision-only sambil mencoba sambung ulang")
+            self.robot.start_reconnect()
             return
 
-        print("  [ROBOT] Connected — initializing & enabling...")
-        if self.robot.initialize():
-            self.robot.enabled = True
-            print("  [ROBOT] ✓ Enabled and ready")
-
-            print("  [ROBOT] Moving to initial pose...")
-            self.robot.move_to_initial_pose(self.presets)
-            self.robot.wait_until_idle(timeout=self.config.safety_timeout)
-            print("  [ROBOT] ✓ At initial pose")
-
-            self.robot.disable()
-            print("  [ROBOT] ✓ Standby — servo off, tunggu /robot/enable dari backend")
-        else:
-            print("  [ROBOT] ⚠ Initialize failed — robot not enabled")
+        print("  [ROBOT] ✓ Connected — standby, tunggu /robot/enable dari backend")
 
     # ─────────────────────────────────────────────────────────────
     #  Backend callback — fire-and-forget di thread terpisah
@@ -204,6 +215,222 @@ class Runtime:
         """Dipanggil setelah robot enabled & selesai homing. Sequence pose
         otomatis dimulai dari sini (only = posisi tertentu saja, untuk retake)."""
         self.sequence.start(only)
+
+    # ─────────────────────────────────────────────────────────────
+    #  Mode kerja robot (enable / disable / stop)
+    # ─────────────────────────────────────────────────────────────
+    @property
+    def move_timeout(self):
+        """Batas tunggu satu gerak. Gerak lewat preset transit bisa jauh lebih lama
+        dari safety_timeout, dan timeout di sini menghentikan sesi."""
+        return self.config.safety_timeout * 3
+
+    def mode_status(self) -> dict:
+        standby = self.robot_mode == MODE_STANDBY and not self.robot_error
+        if standby and not self.dry_run:
+            standby = self.robot.connected and not self.robot.enabled
+        return {"mode": self.robot_mode, "standby": bool(standby), "error": self.robot_error}
+
+    def request_enable(self, only=None):
+        """Mulai sesi. Mengembalikan (body JSON, status HTTP)."""
+        if self.dry_run:
+            self.session_stopped = False
+            self.session_active = True
+            self.robot_mode = MODE_ACTIVE
+            self.notify_session_started(only)
+            print("  [SESSION] ✓ Started (dry-run)")
+            return {"status": "enabled", "message": "Dry-run session active"}, 200
+
+        if not self.robot.connected:
+            self.session_stopped = True
+            return {"error": "not connected"}, 503
+
+        with self._mode_lock:
+            if self.robot_mode == MODE_ENABLING:
+                return {"status": "enabling", "message": "Robot sedang diaktifkan"}, 200
+            if self.robot_mode in (MODE_DISABLING, MODE_STOPPING):
+                # Booth mencoba lagi sebentar lagi.
+                return {"error": "robot sedang dimatikan, coba lagi"}, 409
+            if self.robot_mode == MODE_ACTIVE and self.robot.enabled:
+                return {"status": "already_enabled"}, 200
+
+            self.robot_mode      = MODE_ENABLING
+            self.robot_error     = None
+            self.session_stopped = False
+            self._stop_requested = False
+            self._mode_cancel.clear()
+            self._mode_worker = threading.Thread(
+                target=self._enable_worker, args=(only,), daemon=True, name="robot_enable")
+            self._mode_worker.start()
+
+        return {
+            "status":  "enabling",
+            "message": "Robot diaktifkan, homing, lalu sequence pose otomatis dimulai",
+        }, 200
+
+    def _enable_worker(self, only):
+        robot = self.robot
+        cancelled = False
+        try:
+            ok = robot.initialize(should_abort=self._mode_cancel.is_set)
+            with self._mode_lock:
+                if ok and not self._mode_cancel.is_set():
+                    self.session_active = True
+                    print("  [ROBOT] Moving to initial pose after enable...")
+                    moved = robot.move_to_initial_pose(self.presets)
+                else:
+                    moved = False
+
+            arrived = moved and robot.wait_until_idle(
+                timeout=self.move_timeout, should_abort=lambda: self._stop_requested)
+            # Verifikasi current_preset ke posisi FISIK (anti state basi kalau
+            # robot sempat digerakkan manual lewat Dobot Studio).
+            if arrived:
+                robot.sync_current_preset(self.presets)
+                print("  [ROBOT] ✓ At initial pose")
+
+            with self._mode_lock:
+                if arrived and not self._mode_cancel.is_set():
+                    self.robot_mode = MODE_ACTIVE
+                    self._mode_worker = None
+                    print("  [SESSION] ✓ Started")
+                    # Sequence baru jalan SETELAH homing selesai — kalau dimulai
+                    # lebih awal, gerak ke pose 1 bertabrakan dengan gerak homing.
+                    self.notify_session_started(only)
+                    return
+                cancelled = self._mode_cancel.is_set()
+                self.session_active = False
+                self.robot_mode = MODE_DISABLING if cancelled else MODE_STOPPING
+        except Exception as e:
+            print(f"  [ROBOT ERROR] Enable: {e}")
+            cancelled = self._mode_cancel.is_set()
+
+        if cancelled:
+            print("  [ROBOT] Enable dibatalkan — robot dimatikan lagi")
+            self._home_and_disable()
+        else:
+            # Gagal enable: tanpa homing, posisi dan kondisi lengan tidak pasti.
+            robot.disable()
+            self.session_stopped = True
+            self._finish_mode(False, "Robot gagal diaktifkan")
+
+    def request_disable(self):
+        """Akhiri sesi: pulang ke pose awal lalu servo off, di thread sendiri."""
+        self.session_stopped = False
+        if self.dry_run:
+            self.session_active = False
+            self.stop_session()
+            self.robot_mode = MODE_STANDBY
+            print("  [SESSION] ✓ Ended (dry-run)")
+            return {"status": "disabled", "message": "Dry-run session ended"}, 200
+
+        if not self.robot.connected:
+            return {"error": "not connected"}, 503
+
+        with self._mode_lock:
+            if self.robot_mode == MODE_ENABLING:
+                # Worker enable yang mematikan, supaya tidak ada dua thread yang
+                # memerintah lengan.
+                self._mode_cancel.set()
+                self.session_active = False
+                return {"status": "disabling", "message": "Enable dibatalkan, robot dimatikan"}, 200
+            if self.robot_mode in (MODE_DISABLING, MODE_STOPPING):
+                return {"status": "disabling", "message": "Robot sedang dimatikan"}, 200
+            if not self.robot.enabled:
+                self.robot_mode  = MODE_STANDBY
+                self.robot_error = None
+                self.session_active = False
+                return {"status": "already_disabled"}, 200
+            self.robot_mode = MODE_DISABLING
+            self.session_active = False
+
+        # Hentikan sequence & tracking DULU, baru pulang — supaya tidak ada
+        # perintah tracking yang menyusul setelah gerak homing dimulai.
+        self.stop_session()
+        print("  [SESSION] ✓ Ended")
+
+        with self._mode_lock:
+            self._mode_worker = threading.Thread(
+                target=self._home_and_disable, daemon=True, name="robot_disable")
+            self._mode_worker.start()
+        return {
+            "status":  "disabling",
+            "message": "Robot kembali ke initial pose lalu langsung dimatikan",
+        }, 200
+
+    def _home_and_disable(self):
+        robot = self.robot
+        try:
+            with self._mode_lock:
+                moved = not self._stop_requested and robot.move_to_initial_pose(self.presets)
+            if moved:
+                print("  [ROBOT] Returning to initial pose before disable...")
+                robot.wait_until_idle(timeout=self.move_timeout,
+                                      should_abort=lambda: self._stop_requested)
+            disabled = robot.disable()
+        except Exception as e:
+            print(f"  [ROBOT ERROR] Disable: {e}")
+            disabled = False
+        self._finish_mode(disabled, "Robot gagal dimatikan")
+
+    def _finish_mode(self, ok, error):
+        """Worker selesai: kembali ke standby dan catat kalau ada yang gagal."""
+        with self._mode_lock:
+            self.robot_mode = MODE_STANDBY
+            self._mode_worker = None
+            if not ok:
+                self.robot_error = error
+                print(f"  [ROBOT ERROR] {error}")
+
+    def request_stop(self):
+        """Emergency stop: gerakan dihentikan lebih dulu, baru sesi dan servo."""
+        if self.robot_mode in (MODE_ENABLING, MODE_ACTIVE):
+            self.session_stopped = True
+        if self.dry_run:
+            self.session_active = False
+            self.stop_session()
+            self.robot_mode = MODE_STANDBY
+            return {"status": "stopped", "disabled": True}, 200
+
+        with self._mode_lock:
+            self._stop_requested = True
+            self._mode_cancel.set()
+            self.session_active = False
+            self.robot_mode = MODE_STOPPING
+            worker = self._mode_worker
+
+        self.sequence.signal_stop()
+        if self.tracker:
+            self.tracker.stop()
+        self.robot.stop()
+        self.stop_session()
+        disabled = self.robot.disable()
+
+        with self._mode_lock:
+            # Worker yang masih jalan memanggil disable sekali lagi lalu _finish_mode.
+            if not (worker and worker.is_alive()):
+                self.robot_mode = MODE_STANDBY
+            if not disabled:
+                self.robot_error = "Emergency stop: servo belum mati"
+
+        if not disabled:
+            status = 503 if not self.robot.connected else 502
+            return {"error": "Emergency stop: servo belum mati", "disabled": False}, status
+        return {"status": "stopped", "disabled": True}, 200
+
+    def abort_motion(self, reason):
+        """Dipanggil thread sequence saat lengan gagal sampai di pose. Sama seperti
+        request_stop, tapi tanpa menunggu thread sequence yang memanggilnya."""
+        with self._mode_lock:
+            self._stop_requested = True
+            self.session_active = False
+            self.session_stopped = True
+            self.robot_mode = MODE_STOPPING
+        disabled = self.dry_run or self.robot.disable()
+        with self._mode_lock:
+            self.robot_mode = MODE_STANDBY
+            self.robot_error = reason if disabled else f"{reason}; servo belum mati"
+        print(f"  [ROBOT ERROR] {self.robot_error}")
 
     def stop_session(self):
         """Hentikan sequence + tracking (dipanggil /robot/disable & shutdown)."""
@@ -285,8 +512,9 @@ class Runtime:
             self.tracker.shutdown()
         if self.detector:
             self.detector.stop()
-        if self.robot and not self.dry_run and self.robot.connected and self.robot.enabled:
-            print("  [ROBOT] Returning to initial pose before shutdown...")
-            self.robot.move_to_initial_pose(self.presets)
-            self.robot.wait_until_idle(timeout=self.config.safety_timeout)
+        if self.robot and not self.dry_run:
+            if self.robot.connected and self.robot.enabled:
+                print("  [ROBOT] Returning to initial pose before shutdown...")
+                self.robot.move_to_initial_pose(self.presets)
+                self.robot.wait_until_idle(timeout=self.config.safety_timeout)
             self.robot.disconnect()

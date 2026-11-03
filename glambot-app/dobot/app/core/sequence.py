@@ -66,6 +66,10 @@ class SequenceRunner:
         self._thread.start()
         return True
 
+    def signal_stop(self):
+        """Tandai berhenti tanpa menunggu thread — untuk jalur darurat."""
+        self._stop.set()
+
     def stop(self):
         self._stop.set()
         tracker = self.runtime.tracker
@@ -176,6 +180,7 @@ class SequenceRunner:
         if self._wait(cfg.sequence_start_delay_sec):
             return
 
+        aborted = False
         for i, preset_num in enumerate(order, start=1):
             if self._only and i not in self._only:
                 continue
@@ -184,13 +189,20 @@ class SequenceRunner:
             if not rt.session_active:
                 print("  [SEQUENCE] Sesi tidak aktif — hentikan sequence")
                 break
-            self._run_slot(i, preset_num)
+            if not self._run_slot(i, preset_num):
+                aborted = True
+                break
 
         tracker = rt.tracker
         if tracker:
             tracker.stop()
 
-        finished = not self._stop.is_set()
+        if aborted:
+            # Posisi lengan tidak pasti: jangan pulang, langsung berhenti. Booth
+            # pindah ke Review saat state DONE, pose yang terlewat tampil kosong.
+            rt.abort_motion(f"Gagal sampai di pose {self._index}")
+
+        finished = not aborted and not self._stop.is_set()
         with self._lock:
             self._state    = DONE
             self._preset   = None
@@ -198,6 +210,7 @@ class SequenceRunner:
         print(f"  [SEQUENCE] ══ Selesai (complete={finished}) ══\n")
 
     def _run_slot(self, index, preset_num):
+        """False kalau lengan gagal sampai di pose dan sequence harus berhenti."""
         rt  = self.runtime
         cfg = self.config
 
@@ -230,14 +243,19 @@ class SequenceRunner:
             rt.robot.move_to_joints(preset["joints"], name=preset["name"])
             time.sleep(0.5)
         else:
-            if not rt.robot.move_to_preset(preset_num, rt.presets):
-                print(f"  [SEQUENCE ⚠] Gagal gerak ke preset {preset_num} — "
+            arrived = (rt.robot.move_to_preset(preset_num, rt.presets)
+                       and rt.robot.wait_until_idle(timeout=rt.move_timeout,
+                                                    should_abort=self._stop.is_set))
+            if self._stop.is_set():
+                return True
+            if not arrived:
+                print(f"  [SEQUENCE ⚠] Gagal sampai di preset {preset_num} — "
                       f"connected={rt.robot.connected}, enabled={rt.robot.enabled}")
-            rt.robot.wait_until_idle(timeout=cfg.safety_timeout)
+                return False
             time.sleep(cfg.post_action_delay)
 
         if self._stop.is_set():
-            return
+            return True
 
         # ── 2. Bersiap PREP detik setelah robot sampai (face tracking ON) ──
         prep = max(0.0, cfg.sequence_prep_sec)
@@ -248,7 +266,7 @@ class SequenceRunner:
         if tracker and cfg.face_track_enabled:
             tracker.start(preset_num, preset["joints"])
         if self._wait(prep):
-            return
+            return True
 
         # ── 3. Bekukan lengan, serahkan countdown ke backend Go ──────
         # Skip tidak boleh ikut memotong jendela countdown di bawah.
@@ -273,12 +291,12 @@ class SequenceRunner:
         # (capture_seq bumps); fall back to fixed timing if backend is unreachable.
         if seq_before is None:
             if self._wait(lead):
-                return
+                return True
         else:
             deadline = time.time() + lead + 15.0
             while time.time() < deadline:
                 if self._stop.wait(0.2):
-                    return
+                    return True
                 seq = self._capture_seq()
                 if seq is not None and seq > seq_before:
                     break
@@ -286,8 +304,8 @@ class SequenceRunner:
                 print(f"  [SEQUENCE] ⚠ Pose {index}: konfirmasi jepret tidak datang — lanjut")
 
         # Small pause so the arm does not jerk right after the shutter.
-        if self._wait(max(cfg.post_action_delay, cfg.sequence_after_shot_sec)):
-            return
+        self._wait(max(cfg.post_action_delay, cfg.sequence_after_shot_sec))
+        return True
 
     def _capture_seq(self):
         """Go's capture counter from GET /api/robot/config, or None if unreachable."""

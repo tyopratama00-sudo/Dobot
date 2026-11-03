@@ -59,6 +59,18 @@ Endpoint `/api/robot/liveview/stream` tetap ada (berguna untuk cek langsung dari
 
 Dua pengaman kecil yang ditambahkan di atas basis 12.5: `isMountedRef` di-set `true` tiap mount (remount StrictMode dulu mematikan timer freeze), dan `pendingRef` ikut dilepas saat loop polling (re-)start — tanpa itu satu frame yang menggantung bikin *Try again* tidak berefek sama sekali.
 
+### Keselamatan robot: mode kerja, stop, reconnect (November 2026)
+
+- **Service start tanpa gerak.** `init_hardware` hanya connect. Lengan diam di posisi terakhirnya sampai `/robot/enable` pertama, lalu pulang ke pose awal.
+- **Mode kerja satu pintu.** `Runtime` memegang `standby → enabling → active → disabling/stopping`. Disable yang datang saat enable membatalkan enable, tidak lagi dijawab `already_disabled`.
+- **Status "mati" harus terkonfirmasi.** `GET /robot/status` kini punya `mode`, `standby`, `error`. Backend Go menunggu `standby=true` di goroutine (booth tidak ikut menunggu, enable berikutnya antre) dan jatuh ke emergency stop kalau tidak kunjung standby.
+- **Emergency stop.** `/robot/stop` mengirim `Stop()`, mereset sesi, lalu `DisableRobot()`. Balasan selain 200 berarti servo belum tentu mati. Lengan tetap diam di tempat, tidak melanjutkan sendiri.
+- **Booth tidak ikut macet.** `/detection` melaporkan `session_stopped` saat sesi berhenti karena stop, gagal gerak, gagal enable, atau robot offline. Booth langsung pindah ke Review dengan foto yang sudah ada, dan ambil ulang menyalakan robot lalu pulang ke pose awal lagi.
+- **Gerak gagal = sesi berhenti.** Balasan robot dicek `ErrorID`-nya. Kalau lengan ditolak atau tidak sampai dalam `SAFETY_TIMEOUT × 3`, kamera tidak memotret, robot dimatikan, dan booth lanjut ke Review dengan pose kosong.
+- **Reconnect.** Koneksi yang putus atau timeout ditutup lalu disambung ulang otomatis. Gerak yang terputus tidak dikirim ulang: robot dihentikan dan dimatikan dulu.
+
+Tes: `cd dobot; venv\Scripts\python -m unittest discover -s tests -t .` (robot tiruan). Efek `Stop()` pada lengan asli dan format balasan firmware tetap harus dicoba di robotnya, dengan E-stop fisik siap ditekan.
+
 ### Keselamatan enable/disable robot (baru)
 
 Tiga lubang di jalur mode kerja dobot, semuanya bisa meninggalkan lengan **aktif tanpa sesi**:

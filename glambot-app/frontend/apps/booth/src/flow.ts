@@ -620,6 +620,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
       }
 
       const done =
+        det?.session_stopped ||
         (seenActive && (seq?.complete || fsm === 'DONE')) ||
         (!det && (retakeAngle === null ? n >= total : n > count0)) ||
         Date.now() - started > limitMs;
