@@ -356,7 +356,7 @@ if ($Service) {
             $npm = Get-ToolPath 'npm.cmd' 'Pasang Node.js dari https://nodejs.org dan pastikan folder-nya masuk PATH.'
             if (-not $npm) { return }
             if ($Dev) {
-                & $npm run dev -w @photobooth/booth -- --host 0.0.0.0
+                & $npm run dev -w @photobooth/booth
                 return
             }
             if ($Clean) {
@@ -375,7 +375,7 @@ if ($Service) {
             if ($notReady.Count -gt 0) {
                 Write-Host ("  [!] {0} belum nyala sampai batas waktu; booth tetap distart." -f ($notReady -join ' & ')) -ForegroundColor Yellow
             }
-            & $npm run preview -w @photobooth/booth -- --host 0.0.0.0
+            & $npm run preview -w @photobooth/booth
         }
         'admin' {
             Set-Location $FrontendDir

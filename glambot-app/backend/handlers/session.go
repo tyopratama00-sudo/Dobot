@@ -201,14 +201,14 @@ func UpdateSessionStatus(w http.ResponseWriter, r *http.Request) {
 
 // isAllowedStatusTransition membatasi perpindahan status sesi agar pembayaran
 // tidak bisa dilewati. Kunci: 'shooting' hanya boleh dari 'paid'/'shooting'.
+// 'paid' sengaja tidak ada di sini: endpoint ini publik, jadi lunas hanya boleh
+// diset alur pembayaran (markTransactionPaid dkk. yang menulis langsung ke DB).
 // 'expired' selalu boleh (timeout/cleanup). Status target tak dikenal → ditolak.
 func isAllowedStatusTransition(cur, next models.SessionStatus) bool {
 	if cur == next {
 		return true
 	}
 	switch next {
-	case models.StatusPaid:
-		return cur == models.StatusPendingPayment
 	case models.StatusShooting:
 		return cur == models.StatusPaid
 	case models.StatusCompleted:

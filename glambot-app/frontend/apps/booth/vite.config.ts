@@ -15,8 +15,10 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: '../..',
     plugins: [react()],
-    server: { port: 5173, strictPort: true, host: true, proxy },
-    preview: { port: 5173, strictPort: true, host: true, proxy },
+    // Booth hanya dibuka di mesin kiosk. Jangan buka ke LAN: proxy /dobot di atas
+    // meneruskan perintah robot tanpa login.
+    server: { port: 5173, strictPort: true, host: '127.0.0.1', proxy },
+    preview: { port: 5173, strictPort: true, host: '127.0.0.1', proxy },
     build: { outDir: 'dist', sourcemap: false, target: 'es2020', chunkSizeWarningLimit: 1200 },
   };
 });

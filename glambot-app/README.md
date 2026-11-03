@@ -488,7 +488,7 @@ Flag yang tersedia:
 
 | Flag | Efek |
 |---|---|
-| `-Dev` | Booth pakai `npm run dev -w @photobooth/booth -- --host 0.0.0.0` (HMR) |
+| `-Dev` | Booth pakai `npm run dev -w @photobooth/booth` (HMR) |
 | `-Rebuild` | Build booth ulang |
 | `-Clean` | Hapus `frontend/apps/booth/dist` sebelum build |
 | `-NoRobot` | Dobot jalan `--no-robot` (vision saja, tanpa hardware) |
@@ -536,25 +536,16 @@ Backend listen di `http://localhost:8080` (atau `:8080` di semua interface untuk
 **Terminal 2 — Booth:**
 ```bash
 cd frontend
-npm run dev -w @photobooth/booth -- --host 0.0.0.0
+npm run dev -w @photobooth/booth
 ```
 
-Booth kiosk di `http://localhost:5173`.
+Booth kiosk di `http://127.0.0.1:5173`.
 
-### Akses dari HP (LAN)
+### Akses dari perangkat lain (LAN)
 
-Di PC dev (Windows):
-1. Cari IP LAN: `ipconfig` → catat "IPv4 Address" (misal `192.168.1.150`)
-2. Allow Windows Firewall untuk port 5173 + 8080
-3. Edit `frontend/.env` bila alamat backend perlu diubah:
-   ```ini
-   VITE_API_PROXY=http://localhost:8080
-   ```
-   Vite proxy teruskan API ke Go backend.
-4. Restart `npm run dev`
+Booth **hanya** bisa dibuka di mesin kiosk (`127.0.0.1`), dan service dobot juga sebaiknya `HOST=127.0.0.1`. Proxy `/dobot` dan port 5001 menerima perintah robot tanpa login, jadi jangan dibuka ke jaringan.
 
-Di HP (browser):
-- Buka `http://<kiosk-ip>:5173` untuk booth. QR hasil sesi membuka endpoint GIF Go backend.
+QR hasil sesi memakai folder Google Drive kalau siap. Fallback-nya endpoint GIF Go backend: set `VITE_DOWNLOAD_PUBLIC_URL=http://<kiosk-ip>:8080` di `frontend/.env`, karena tanpa itu QR mengarah ke `localhost` yang tidak bisa dibuka dari HP.
 
 ---
 
@@ -622,7 +613,7 @@ go build -o photobooth .       # Linux/Mac
 ```bash
 cd frontend
 npm run build -w @photobooth/booth
-npm run preview -w @photobooth/booth -- --host 0.0.0.0
+npm run preview -w @photobooth/booth
 ```
 
 Booth preview tersedia di `http://localhost:5173`. Untuk jalankan, gunakan `start.ps1` dari root repository.

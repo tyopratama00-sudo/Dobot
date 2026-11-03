@@ -2,6 +2,7 @@ package routes
 
 import (
 	"net/http"
+	"os"
 	"photobooth/handlers"
 	"photobooth/middleware"
 	"strings"
@@ -27,19 +28,7 @@ func Setup(storagePath string) http.Handler {
 	})
 
 	// ─── Static File Server ───────────────────────────────────────────────────
-	storageFS := http.StripPrefix("/storage/", http.FileServer(http.Dir(storagePath)))
-	r.Get("/storage/*", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".db") {
-			http.Error(w, "Forbidden", http.StatusForbidden)
-			return
-		}
-		// Nama file audio stabil tapi isinya bisa diganti → wajibkan revalidasi
-		// supaya browser tidak memutar versi lama (foto/frame nama unik, aman).
-		if strings.HasPrefix(r.URL.Path, "/storage/audio/") {
-			w.Header().Set("Cache-Control", "no-cache")
-		}
-		storageFS.ServeHTTP(w, r)
-	})
+	r.Get("/storage/*", storageHandler(storagePath))
 
 	// ─── API Routes ───────────────────────────────────────────────────────────
 	r.Route("/api", func(r chi.Router) {
@@ -213,4 +202,43 @@ func Setup(storagePath string) http.Handler {
 	})
 
 	return r
+}
+
+func storageHandler(storagePath string) http.HandlerFunc {
+	storageFS := http.StripPrefix("/storage/", http.FileServer(noDirFS{http.Dir(storagePath)}))
+	return func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".db") {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		// Nama file audio stabil tapi isinya bisa diganti → wajibkan revalidasi
+		// supaya browser tidak memutar versi lama (foto/frame nama unik, aman).
+		if strings.HasPrefix(r.URL.Path, "/storage/audio/") {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		storageFS.ServeHTTP(w, r)
+	}
+}
+
+// noDirFS menyembunyikan folder dari http.FileServer. Tanpa ini FileServer
+// menampilkan isi folder, dan /storage/sessions/ membocorkan ID semua sesi.
+type noDirFS struct {
+	http.FileSystem
+}
+
+func (fs noDirFS) Open(name string) (http.File, error) {
+	f, err := fs.FileSystem.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
 }
