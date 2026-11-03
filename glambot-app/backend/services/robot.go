@@ -80,6 +80,13 @@ const (
 	robotDisableRetryDelay = 700 * time.Millisecond
 )
 
+// Dobot membalas disable sebelum lengan selesai pulang, jadi "mati" baru dicatat
+// setelah /robot/status melaporkan standby. Batasnya mencakup batal-enable + homing.
+var (
+	robotStandbyTimeout = 60 * time.Second
+	robotStandbyPoll    = 500 * time.Millisecond
+)
+
 // EnableRobot memanggil API robot luar untuk menyalakan mode kerja.
 // body (opsional) diteruskan apa adanya, mis. {"only":[7]} untuk retake.
 func EnableRobot(body []byte) error {
@@ -100,17 +107,23 @@ func EnableRobot(body []byte) error {
 // dan kalau tetap gagal dijatuhkan ke emergency stop. Flag lokal hanya di-set
 // false kalau robot benar-benar mengkonfirmasi — supaya `/api/robot/config`
 // tidak melaporkan "mati" untuk robot yang nyatanya masih hidup.
+//
+// Konfirmasinya ditunggu di goroutine karena booth menunggu balasan request ini.
+// robotModeMu ikut dipegang goroutine itu, jadi enable berikutnya tetap antre
+// sampai lengan benar-benar mati.
 func DisableRobot() error {
 	robotModeMu.Lock()
-	defer robotModeMu.Unlock()
 
 	var lastErr error
 	for attempt := 1; attempt <= robotDisableAttempts; attempt++ {
 		if err := callRobotAPI(http.MethodPost, "/robot/disable", nil); err == nil {
-			config.App.SetRobotEnabled(false)
 			if attempt > 1 {
 				log.Printf("✅ Robot disable berhasil pada percobaan ke-%d", attempt)
 			}
+			go func() {
+				defer robotModeMu.Unlock()
+				confirmRobotStandby()
+			}()
 			return nil
 		} else {
 			lastErr = err
@@ -120,6 +133,8 @@ func DisableRobot() error {
 			time.Sleep(robotDisableRetryDelay)
 		}
 	}
+
+	defer robotModeMu.Unlock()
 
 	// Jaring terakhir: emergency stop. Lebih kasar dari disable, tapi jauh lebih
 	// baik daripada meninggalkan lengan aktif tanpa sesi.
@@ -133,6 +148,61 @@ func DisableRobot() error {
 	}
 
 	return fmt.Errorf("robot tidak bisa dimatikan setelah %d percobaan + emergency stop: %w", robotDisableAttempts, lastErr)
+}
+
+// confirmRobotStandby menunggu dobot melaporkan standby. Kalau tidak kunjung
+// standby atau dobot melaporkan error, jatuh ke emergency stop.
+func confirmRobotStandby() {
+	deadline := time.Now().Add(robotStandbyTimeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		status, err := fetchRobotStatus()
+		lastErr = err
+		if err == nil {
+			if status.Standby {
+				config.App.SetRobotEnabled(false)
+				return
+			}
+			if status.Mode == "standby" {
+				lastErr = fmt.Errorf("%s", status.Error)
+				break
+			}
+		}
+		time.Sleep(robotStandbyPoll)
+	}
+
+	log.Printf("🛑 Robot belum standby setelah disable (%v) — mencoba emergency stop", lastErr)
+	if err := callRobotAPI(http.MethodPost, "/robot/stop", nil); err != nil {
+		log.Printf("🚨 Emergency stop JUGA gagal: %v — robot mungkin masih aktif, cek fisik!", err)
+		return
+	}
+	config.App.SetRobotEnabled(false)
+}
+
+type robotStatus struct {
+	Mode    string `json:"mode"`
+	Standby bool   `json:"standby"`
+	Error   string `json:"error"`
+}
+
+func fetchRobotStatus() (*robotStatus, error) {
+	base, err := robotBaseURL()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := robotHTTPClient.Get(base + "/robot/status")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("robot status %d", resp.StatusCode)
+	}
+	var status robotStatus
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&status); err != nil {
+		return nil, err
+	}
+	return &status, nil
 }
 
 // StopRobot memanggil emergency stop pada robot luar.

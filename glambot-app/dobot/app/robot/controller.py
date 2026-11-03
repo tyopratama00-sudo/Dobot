@@ -7,6 +7,10 @@ INITIAL_POSE_PRESET = 1
 TRANSIT_PRESET      = 11
 
 ROBOT_MODE_ENABLE  = 5    
+REPLY_TIMEOUT      = 5.0   # batas tunggu balasan robot
+REPLY_TAIL_TIMEOUT = 0.3   # balasan tanpa penanda akhir: tunggu sisanya sebentar
+RECONNECT_INTERVAL = 2.0
+
 ROBOT_MODE_RUNNING = 7 
 
 
@@ -33,12 +37,22 @@ class DobotController:
         self.last_move_time = 0.0
 
         self._lock = threading.Lock()
+        self._closing = False
+        self._reconnecting = False
+
+    def _open_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(REPLY_TIMEOUT)
+        try:
+            sock.connect((self.ip, self.dashboard_port))
+        except Exception:
+            sock.close()
+            raise
+        return sock
 
     def connect(self):
         try:
-            self.dashboard = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.dashboard.settimeout(5)
-            self.dashboard.connect((self.ip, self.dashboard_port))
+            self.dashboard = self._open_socket()
             print(f"  [ROBOT] Dashboard → {self.ip}:{self.dashboard_port}")
             self.connected = True
             return True
@@ -48,15 +62,96 @@ class DobotController:
             return False
 
     def _send_dashboard(self, cmd):
-        if not self.dashboard:
-            return None
         with self._lock:
-            try:
-                self.dashboard.sendall((cmd + "\n").encode("utf-8"))
-                return self.dashboard.recv(1024).decode("utf-8").strip()
-            except Exception as e:
-                print(f"  [ROBOT ERROR] Dashboard: {e}")
+            sock = self.dashboard
+            if not sock:
                 return None
+            try:
+                sock.sendall((cmd + "\n").encode("utf-8"))
+                return self._read_reply(sock)
+            except OSError as e:
+                # Balasan yang telat akan terbaca sebagai balasan perintah
+                # berikutnya, jadi koneksi yang timeout tidak dipakai lagi.
+                print(f"  [ROBOT ERROR] Dashboard: {e} — koneksi diputus")
+                self._drop_connection_locked()
+                return None
+
+    @staticmethod
+    def _read_reply(sock):
+        """Baca satu balasan sampai ';' atau baris baru. Kalau penandanya tidak
+        datang, sisa data ditunggu sebentar lalu dipakai apa adanya."""
+        buf = b""
+        try:
+            while b";" not in buf and b"\n" not in buf:
+                try:
+                    chunk = sock.recv(1024)
+                except socket.timeout:
+                    if buf:
+                        break
+                    raise
+                if not chunk:
+                    raise ConnectionError("koneksi ditutup robot")
+                buf += chunk
+                sock.settimeout(REPLY_TAIL_TIMEOUT)
+        finally:
+            sock.settimeout(REPLY_TIMEOUT)
+        return buf.decode("utf-8", errors="replace").strip()
+
+    # ─────────────────────────────────────────────────────────────
+    #  RECONNECT
+    # ─────────────────────────────────────────────────────────────
+    def _drop_connection_locked(self):
+        if self.dashboard:
+            try:
+                self.dashboard.close()
+            except OSError:
+                pass
+        self.dashboard = None
+        self.connected = False
+        self.enabled   = False
+        self.start_reconnect()
+
+    def start_reconnect(self):
+        if self._closing or self._reconnecting:
+            return
+        self._reconnecting = True
+        threading.Thread(target=self._reconnect_loop, daemon=True, name="robot_reconnect").start()
+
+    def _reconnect_loop(self):
+        """Sambung ulang sampai berhasil. Perintah gerak yang terputus TIDAK
+        dikirim ulang: robot dihentikan dan dimatikan dulu, sesi berikutnya
+        menyalakannya lagi lewat initialize()."""
+        try:
+            while not self._closing:
+                time.sleep(RECONNECT_INTERVAL)
+                try:
+                    sock = self._open_socket()
+                except OSError:
+                    continue
+                with self._lock:
+                    self.dashboard = sock
+                self._send_dashboard("Stop()")
+                self._send_dashboard("DisableRobot()")
+                with self._lock:
+                    if self.dashboard is sock:
+                        self.enabled   = False
+                        self.connected = True
+                        print("  [ROBOT] ✓ Tersambung lagi — robot standby")
+                        return
+        finally:
+            self._reconnecting = False
+
+    @staticmethod
+    def _reply_ok(resp):
+        """Balasan robot diawali ErrorID (0 = diterima). Balasan yang formatnya
+        tidak dikenal tetap diterima supaya tidak menghentikan robot tanpa sebab."""
+        if not resp:
+            return False
+        m = re.match(r"\s*(-?\d+)\s*,", resp)
+        if not m:
+            print(f"  [ROBOT] ⚠ Format balasan tidak dikenal: {resp}")
+            return True
+        return int(m.group(1)) == 0
 
     def _robot_mode(self):
         resp = self._send_dashboard("RobotMode()")
@@ -65,44 +160,59 @@ class DobotController:
         m = re.search(r"\{(-?\d+)\}", resp)
         return int(m.group(1)) if m else None
 
-    def wait_until_idle(self, timeout=15.0, poll=0.2, settle_grace=1.0):
-        if self.dashboard is None:
-            return
+    def wait_until_idle(self, timeout=15.0, poll=0.2, settle_grace=1.0, should_abort=None):
+        """True kalau lengan sudah diam. False kalau timeout, koneksi putus, atau
+        should_abort() terpenuhi."""
         start      = time.time()
         saw_motion = False
         while time.time() - start < timeout:
+            if not self.connected or (should_abort and should_abort()):
+                return False
             mode = self._robot_mode()
             if mode == ROBOT_MODE_RUNNING:
                 saw_motion = True
             elif mode == ROBOT_MODE_ENABLE:
                 if saw_motion:
                     print("  [ROBOT] ✓ Motion complete")
-                    return
+                    return True
                 if time.time() - start >= settle_grace:
-                    return                      # never moved → already at target
+                    return True                 # never moved → already at target
             time.sleep(poll)
         print(f"  [ROBOT] wait_until_idle timed out after {timeout:.0f}s")
+        return False
 
-    def _wait_until_enabled(self, poll=0.1):
+    def _wait_until_enabled(self, poll=0.1, should_abort=None):
         start = time.time()
         while time.time() - start < self.enable_timeout:
+            if should_abort and should_abort():
+                return False
             if self._robot_mode() == ROBOT_MODE_ENABLE:
                 return True
             time.sleep(poll)
         print(f"  [ROBOT] EnableRobot belum ENABLE setelah {self.enable_timeout:.0f}s — lanjut saja")
         return False
 
-    def initialize(self):
+    def initialize(self, should_abort=None):
+        """should_abort: dicek di antara tahap, supaya disable/stop yang datang
+        saat enable tidak perlu menunggu. Hasil False bukan berarti servo mati —
+        pemanggil yang membatalkan tetap harus memanggil disable()."""
         if not self.connected:
             return False
         print("  [ROBOT] Initializing...")
         self._send_dashboard("RequestControl()")
         self._send_dashboard("ClearError()")
-        self._send_dashboard("EnableRobot()")
+        if should_abort and should_abort():
+            return False
+        if self._send_dashboard("EnableRobot()") is None:
+            return False
         # Tunggu servo ENABLE secara event-driven (bukan sleep). RobotMode()
         # bisa flaky, jadi tetap lanjut walau belum terkonfirmasi — hasilnya
         # disimpan untuk di-log.
-        self.enable_confirmed = self._wait_until_enabled()
+        self.enable_confirmed = self._wait_until_enabled(should_abort=should_abort)
+        if should_abort and should_abort():
+            return False
+        if not self.connected:
+            return False
         self.enabled = True
         if not self.enable_confirmed:
             print("  [ROBOT] ⚠️  status ENABLE belum terkonfirmasi (mode read flaky) — tetap lanjut")
@@ -153,8 +263,8 @@ class DobotController:
     def _execute_move(self, joints, label):
         print(f"  [ROBOT] ► Moving to {label}")
         resp = self._send_dashboard(self._joints_to_cmd(joints))
-        if not resp:
-            print(f"  [ROBOT ERROR] Failed to move to {label}")
+        if not self._reply_ok(resp):
+            print(f"  [ROBOT ERROR] Failed to move to {label}: {resp}")
             return False
 
         self.last_move_time = time.time()
@@ -193,7 +303,8 @@ class DobotController:
                 and self.current_preset != TRANSIT_PRESET
                 and TRANSIT_PRESET in presets):
             print(f"  [ROBOT] ↳ Routing via transit preset {TRANSIT_PRESET} (P13) first")
-            self._move_to_preset_direct(TRANSIT_PRESET, presets[TRANSIT_PRESET])
+            if not self._move_to_preset_direct(TRANSIT_PRESET, presets[TRANSIT_PRESET]):
+                return False
 
         return self._move_to_preset_direct(preset_num, presets[preset_num])
 
@@ -221,7 +332,7 @@ class DobotController:
         if not self.connected or not self.enabled:
             return False
         resp = self._send_dashboard(self._joints_to_cmd(joints))
-        if not resp:
+        if not self._reply_ok(resp):
             return False
         self.last_move_time = time.time()
         return True
@@ -283,25 +394,41 @@ class DobotController:
     #  STOP / SHUTDOWN
     # ─────────────────────────────────────────────────────────────
     def stop(self):
-        if self.connected:
-            self._send_dashboard("MoveJog()")
+        """Hentikan gerakan. True kalau robot menerima perintahnya."""
+        if not self.connected:
+            return False
+        ok = self._reply_ok(self._send_dashboard("Stop()"))
+        if ok:
             print("  [ROBOT] ■ Stopped")
+        else:
+            print("  [ROBOT ERROR] Stop() tidak diterima robot")
+        return ok
 
     def disable(self):
-        if self.connected:
-            self._send_dashboard("MoveJog()")
-            time.sleep(0.3)
-            self._send_dashboard("DisableRobot()")
-            self.enabled = False
-            print("  [ROBOT] Disabled")
+        """Hentikan lalu matikan servo. `enabled` hanya menjadi False kalau robot
+        menerima DisableRobot, supaya status tidak melaporkan robot sudah mati
+        padahal belum."""
+        if not self.connected:
+            return False
+        self.stop()
+        time.sleep(0.3)
+        if not self._reply_ok(self._send_dashboard("DisableRobot()")):
+            print("  [ROBOT ERROR] DisableRobot() tidak diterima robot")
+            return False
+        self.enabled = False
+        print("  [ROBOT] Disabled")
+        return True
 
     def disconnect(self):
+        self._closing = True
         if self.enabled:
             self.disable()
-        if self.dashboard:
-            try:
-                self.dashboard.close()
-            except Exception:
-                pass
+        with self._lock:
+            if self.dashboard:
+                try:
+                    self.dashboard.close()
+                except Exception:
+                    pass
+            self.dashboard = None
         self.connected = False
         print("  [ROBOT] Disconnected")
