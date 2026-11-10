@@ -511,6 +511,13 @@ export function backFromPay() {
   });
 }
 
+/* ------------------------------------------------------------------ registration */
+
+/** Lanjut on the registration screen. A rejection (e.g. invalid email) keeps the screen and shows why. */
+export function submitRegistration(name: string, email: string) {
+  void guard('register', () => send({ type: 'register', name, email }));
+}
+
 /* ------------------------------------------------------------------ capture (prototype ready() + run()) */
 
 function setCapture(p: Partial<BoothState['capture']>) {
@@ -894,6 +901,7 @@ export function onIdleTimeout() {
   if (!st) return;
   if (st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();
   switch (timeoutAction(st)) {
+    case 'skip-registration': return void guard('auto', () => sendResilient({ type: 'registration_timeout' }));
     case 'choose-frame': return toFrames();
     case 'confirm-frame': return confirmTemplate();
     case 'auto-pick':

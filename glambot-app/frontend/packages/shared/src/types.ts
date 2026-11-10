@@ -64,6 +64,12 @@ export interface SessionPlan {
   readySeconds: number;
 }
 
+/** Pelanggan name + email typed on the booth (Registrasi; per session, not an account). */
+export interface RegistrationDTO {
+  name: string;
+  email: string;
+}
+
 export interface SessionSnapshot {
   id: string;
   code: string;
@@ -83,6 +89,8 @@ export interface SessionSnapshot {
   capture: { angle: number | null; shot: number | null; retakeAngle: number | null };
   print: PrintDTO | null;
   gallery: GalleryDTO | null;
+  /** Registrasi saved on the paid backend session; absent/null = none (switch off or timed out). */
+  registration?: RegistrationDTO | null;
   version: number;
   updatedAt: string;
 }
@@ -116,6 +124,8 @@ export interface BoothConfig {
   freeDigitalOnly?: boolean;
   /** Explicit admin free/paid mode; independent of a package's price. */
   freeMode?: boolean;
+  /** Registrasi screen after payment: admin switch on and booth email configured. */
+  registration?: boolean;
   environment: string;
 }
 
@@ -145,6 +155,10 @@ export interface ComponentHealth {
 /** Commands the booth sends to POST /api/sessions/:id/commands */
 export const sessionCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('begin') }),
+  /** Lanjut on the registration screen: save name + email, then frame selection. */
+  z.object({ type: z.literal('register'), name: z.string().min(1).max(80), email: z.string().min(3).max(254) }),
+  /** Registration screen timed out: frame selection without a registration. */
+  z.object({ type: z.literal('registration_timeout') }),
   z.object({ type: z.literal('move'), angle: z.number().int().min(0).max(19) }),
   z.object({ type: z.literal('countdown'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),
   z.object({ type: z.literal('capture'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),

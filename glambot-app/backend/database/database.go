@@ -114,6 +114,12 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		// burst GIF live mentah → generator butuh angkanya untuk membingkai
 		// burst sama persis. Kosong = sesi lama, generator fallback cover-fit.
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS slot_transforms TEXT NOT NULL DEFAULT ''`,
+		// Registrasi pelanggan (ADR 0001): nama + email melekat pada sesi yang
+		// dibayar, bukan akun. registered_at NULL = sesi tanpa registrasi.
+		// Cleanup kedaluwarsa tidak menyentuh kolom ini (catatan kunjungan).
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_email TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ`,
 		// Penanda foto raw yang sudah naik ke Drive (upload streaming per-capture)
 		// — cegah dobel-upload, finalize tinggal kirim sisanya.
 		`ALTER TABLE photos ADD COLUMN IF NOT EXISTS drive_uploaded BOOLEAN NOT NULL DEFAULT FALSE`,

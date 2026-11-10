@@ -91,7 +91,8 @@ export class SessionEngine {
     const updated = await this.d.prisma.$transaction(async (tx) => {
       const res = await tx.session.updateMany({
         where: { id: s.id, version: s.version },
-        data: { ...patch, status: to, version: { increment: 1 }, lastActivityAt: new Date() },
+        // REGISTRATION is booth-only (Go backend); this engine never fires START_REGISTRATION.
+        data: { ...patch, status: to as Exclude<SessionState, 'REGISTRATION'>, version: { increment: 1 }, lastActivityAt: new Date() },
       });
       if (res.count !== 1) throw appError('CONFLICT', 409, 'Session was modified concurrently', true);
       await tx.sessionEvent.create({ data: { sessionId: s.id, event, fromStatus: from, toStatus: to, data: data ? (data as never) : undefined } });
@@ -561,6 +562,11 @@ export class SessionEngine {
         await this.move(s, 'RETRY_PAYMENT');
         return null;
       }
+      case 'register':
+      case 'registration_timeout':
+        // Registrasi lives in the Go backend booth flow only.
+        this.requireState(s, []);
+        return null;
     }
   }
 

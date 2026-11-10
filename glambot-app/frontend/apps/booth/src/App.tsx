@@ -6,6 +6,7 @@ import { robot } from './robot/floating';
 import { Welcome } from './screens/Welcome';
 import { Pay } from './screens/Pay';
 import { PayFree } from './screens/PayFree';
+import { Registration } from './screens/Register';
 import { isFreeMode } from './payment-mode';
 import { Ready, Session, sessionPose } from './screens/Capture';
 import { Lightbox, Review } from './screens/Review';
@@ -106,7 +107,7 @@ function useScreenVoice(screen: BoothScreen | 'maintenance') {
   useEffect(() => {
     if (idle && screen === 'pay') !free && voice('pay_wait');
     else if (idle && screen === 'edit') voice('edit_warn');
-    else if (idle && ['review', 'tpl', 'pick', 'final'].includes(screen)) voice('idle_warn');
+    else if (idle && ['register', 'review', 'tpl', 'pick', 'final'].includes(screen)) voice('idle_warn');
   }, [idle, screen]);
 }
 
@@ -145,6 +146,7 @@ const isFree = (s: BoothState) => isFreeMode(s.config);
 const SCREENS: Record<BoothScreen, () => JSX.Element> = {
   welcome: Welcome,
   pay: Pay,
+  register: Registration,
   ready: Ready,
   session: Session,
   review: Review,
@@ -179,6 +181,8 @@ function useTimer() {
       const limit =
         scr === 'pay' && st && UNPAID_STATES.has(st)
           ? cfg.paymentSeconds
+          : scr === 'register'
+            ? cfg.registrationSeconds
           : scr === 'tpl'
             ? cfg.frameSeconds
             : scr === 'pick'
