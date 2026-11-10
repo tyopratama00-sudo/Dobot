@@ -3,6 +3,7 @@
 package dbtest
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -39,7 +40,14 @@ func Schema(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	schema := fmt.Sprintf("t_%d", time.Now().UnixNano())
+	// The clock is coarse on Windows, so the timestamp alone can repeat across
+	// tests running at the same time; the random part keeps names unique.
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		admin.Close()
+		t.Fatalf("random schema name: %v", err)
+	}
+	schema := fmt.Sprintf("t_%d_%x", time.Now().UnixNano(), suffix)
 	if _, err := admin.Exec(`CREATE SCHEMA ` + schema); err != nil {
 		admin.Close()
 		t.Fatalf("create schema: %v", err)
