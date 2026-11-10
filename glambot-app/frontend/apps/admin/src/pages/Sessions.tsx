@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { dt, get, post, qs, rp, type Page } from '../api';
+import { useState, type ReactNode } from 'react';
+import { del, dt, get, post, qs, rp, type Page } from '../api';
 import { Pager, statusChip, useAction, usePoll } from '../ui';
 
 interface Sess {
@@ -30,7 +30,31 @@ interface Detail {
   photos: { id: string; type: 'raw' | 'framed'; url: string; selected: boolean }[];
   transactions: { id: string; midtrans_order_id: string; amount: number; status: string; created_at: string }[];
   registration: Registration | null;
+  email_foto: EmailFoto | null;
 }
+/** Catatan pengiriman Email Foto sesi; null bila sesi tidak pernah registrasi. */
+interface EmailFoto {
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
+  recipient: string;
+  content: '' | 'link_strip' | 'strip' | 'link';
+  attempts: number;
+  reason: string;
+  sent_at: string | null;
+  next_attempt_at: string | null;
+}
+
+const EMAIL_FOTO_STATUS: Record<EmailFoto['status'], [label: string, chip: string]> = {
+  pending: ['Menunggu', 'warn'],
+  sent: ['Terkirim', 'ok'],
+  failed: ['Gagal', 'err'],
+  skipped: ['Tidak dikirim', 'mu'],
+};
+const EMAIL_FOTO_CONTENT: Record<EmailFoto['content'], string> = {
+  '': '—',
+  link_strip: 'Link folder + strip',
+  strip: 'Strip saja',
+  link: 'Link folder saja',
+};
 
 const STATUS: [string, string][] = [
   ['', 'Semua status'],
@@ -121,37 +145,96 @@ function SessionList() {
   );
 }
 
-/** Bagian "Registrasi & Email Foto" pada detail sesi. Status Email Foto dan aksinya menyusul di sini. */
-function RegistrationSection({ registration }: { registration: Registration | null }) {
+/** Bagian "Registrasi & Email Foto" pada detail sesi: data registrasi, status Email Foto, Kirim ulang, dan Hapus data registrasi. */
+function RegistrationSection({
+  id,
+  registration,
+  emailFoto,
+  reload,
+}: {
+  id: string;
+  registration: Registration | null;
+  emailFoto: EmailFoto | null;
+  reload: () => Promise<void>;
+}) {
+  const [email, setEmail] = useState(registration?.email ?? '');
+  const { busy, run } = useAction();
+  const path = `/api/admin/sessions/${encodeURIComponent(id)}`;
+  // Nama dan email dikosongkan oleh "Hapus data registrasi"; waktu registrasi tetap sebagai riwayat.
+  const deleted = !!registration && !registration.name && !registration.email;
+
+  const resend = async () => {
+    const to = email.trim() || registration?.email || '';
+    if (!confirm(`Kirim ulang Email Foto ke ${to}?`)) return;
+    if (await run('resend', () => post(`${path}/email-foto/resend`, { email: email.trim() }), 'Email Foto diantre ulang')) await reload();
+  };
+  const forget = async () => {
+    if (!confirm('Hapus nama dan email pelanggan dari sesi ini? Email Foto yang belum terkirim dibatalkan. Tindakan ini tidak bisa dibatalkan.')) return;
+    if (await run('delete', () => del(`${path}/registration`), 'Data registrasi dihapus')) {
+      setEmail('');
+      await reload();
+    }
+  };
+
+  if (!registration) {
+    return (
+      <div className="card">
+        <h2>Registrasi &amp; Email Foto</h2>
+        <p className="mu">Belum registrasi.</p>
+      </div>
+    );
+  }
+  const [label, chip] = emailFoto ? EMAIL_FOTO_STATUS[emailFoto.status] : ['—', ''];
+  const rows: [string, ReactNode][] = [
+    ['Nama', deleted ? <span className="mu">Data registrasi dihapus</span> : registration.name],
+    ['Email', deleted ? '—' : registration.email],
+    ['Waktu registrasi', dt(registration.registered_at)],
+  ];
+  if (emailFoto) {
+    rows.push(['Status Email Foto', <span className={`chip ${chip}`}>{label}</span>]);
+    if (emailFoto.reason) rows.push([emailFoto.status === 'pending' ? 'Error terakhir' : 'Alasan', emailFoto.reason]);
+    rows.push(['Percobaan', emailFoto.attempts]);
+    if (emailFoto.status === 'pending' && emailFoto.next_attempt_at) rows.push(['Coba lagi', dt(emailFoto.next_attempt_at)]);
+    if (emailFoto.status === 'sent') {
+      rows.push(['Terkirim', dt(emailFoto.sent_at)]);
+      rows.push(['Isi', EMAIL_FOTO_CONTENT[emailFoto.content]]);
+    }
+  }
+
   return (
     <div className="card">
       <h2>Registrasi &amp; Email Foto</h2>
-      {registration ? (
-        <table>
-          <tbody>
-            {(
-              [
-                ['Nama', registration.name],
-                ['Email', registration.email],
-                ['Waktu registrasi', dt(registration.registered_at)],
-              ] as const
-            ).map(([k, v]) => (
-              <tr key={k}>
-                <th style={{ width: 130 }}>{k}</th>
-                <td>{v}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p className="mu">Belum registrasi.</p>
+      <table>
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <th style={{ width: 130 }}>{k}</th>
+              <td>{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {deleted ? null : (
+        <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+          <label className="f" style={{ minWidth: 240 }}>
+            Kirim ke email
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={registration.email} />
+          </label>
+          <button className="btn pr" disabled={busy !== null} onClick={() => void resend()}>
+            {busy === 'resend' ? 'Mengantre…' : 'Kirim ulang'}
+          </button>
+          <span className="spacer" />
+          <button className="btn er" disabled={busy !== null} onClick={() => void forget()}>
+            {busy === 'delete' ? 'Menghapus…' : 'Hapus data registrasi'}
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
 function SessionDetail({ id }: { id: string }) {
-  const [d, , err] = usePoll<Detail>(() => get(`/api/admin/sessions/${encodeURIComponent(id)}`), 0, [id]);
+  const [d, reload, err] = usePoll<Detail>(() => get(`/api/admin/sessions/${encodeURIComponent(id)}`), 0, [id]);
   const [copies, setCopies] = useState(1);
   const { busy, run } = useAction();
   if (err) return <div className="chip err">{err}</div>;
@@ -226,7 +309,7 @@ function SessionDetail({ id }: { id: string }) {
           {d.transactions.length ? null : <p className="mu small">Tidak ada transaksi.</p>}
         </div>
       </div>
-      <RegistrationSection registration={d.registration} />
+      <RegistrationSection key={d.registration?.email ?? ''} id={id} registration={d.registration} emailFoto={d.email_foto} reload={reload} />
       <div className="card">
         <h2>Foto ({raw.length})</h2>
         <div className="photos">
