@@ -145,6 +145,10 @@ func Setup(storagePath string) http.Handler {
 				r.Patch("/settings", handlers.AdminUpdateSettings)
 				r.Delete("/settings", handlers.AdminResetSettings)
 
+				// Email booth (Gmail SMTP dari .env): status + kirim email uji.
+				r.Get("/email", handlers.AdminEmailStatus)
+				r.Post("/email/test", handlers.AdminSendTestEmail)
+
 				// Settings — tuning robot (speed/akselerasi + sequence/face-tracking
 				// timing) yang diteruskan ke service dobot.
 				r.Get("/robot-settings", handlers.GetRobotSettings)
