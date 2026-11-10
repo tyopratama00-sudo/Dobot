@@ -15,11 +15,21 @@ interface Sess {
   drive_url: string;
   created_at: string;
   completed_at?: string;
+  registration_name: string;
+  registration_email: string;
+  registered_at: string | null;
+}
+/** Registrasi melekat pada sesi (ADR 0001); null bila belum registrasi. */
+interface Registration {
+  name: string;
+  email: string;
+  registered_at: string;
 }
 interface Detail {
   session: Sess;
   photos: { id: string; type: 'raw' | 'framed'; url: string; selected: boolean }[];
   transactions: { id: string; midtrans_order_id: string; amount: number; status: string; created_at: string }[];
+  registration: Registration | null;
 }
 
 const STATUS: [string, string][] = [
@@ -47,7 +57,7 @@ function SessionList() {
       <div className="card">
         <div className="form">
           <label className="f">
-            Cari ID sesi
+            Cari ID sesi, nama, atau email
             <input value={f.search} onChange={(e) => set({ search: e.target.value })} />
           </label>
           <label className="f">
@@ -77,6 +87,8 @@ function SessionList() {
             <thead>
               <tr>
                 <th>Waktu</th>
+                <th>Nama</th>
+                <th>Email</th>
                 <th>Paket</th>
                 <th>Frame</th>
                 <th>Foto</th>
@@ -89,6 +101,8 @@ function SessionList() {
               {(list?.data ?? []).map((s) => (
                 <tr key={s.id} className="click" onClick={() => (location.hash = `#/sesi/${s.id}`)}>
                   <td className="small">{dt(s.created_at)}</td>
+                  <td>{s.registration_name || '—'}</td>
+                  <td className="small">{s.registration_email || '—'}</td>
                   <td>{s.package}</td>
                   <td>{s.frame || '—'}</td>
                   <td>{s.photos}</td>
@@ -103,6 +117,35 @@ function SessionList() {
         {list && !list.data.length ? <p className="mu">Tidak ada sesi.</p> : null}
         <Pager meta={list?.meta} onPage={(page) => setF((o) => ({ ...o, page }))} />
       </div>
+    </div>
+  );
+}
+
+/** Bagian "Registrasi & Email Foto" pada detail sesi. Status Email Foto dan aksinya menyusul di sini. */
+function RegistrationSection({ registration }: { registration: Registration | null }) {
+  return (
+    <div className="card">
+      <h2>Registrasi &amp; Email Foto</h2>
+      {registration ? (
+        <table>
+          <tbody>
+            {(
+              [
+                ['Nama', registration.name],
+                ['Email', registration.email],
+                ['Waktu registrasi', dt(registration.registered_at)],
+              ] as const
+            ).map(([k, v]) => (
+              <tr key={k}>
+                <th style={{ width: 130 }}>{k}</th>
+                <td>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="mu">Belum registrasi.</p>
+      )}
     </div>
   );
 }
@@ -183,6 +226,7 @@ function SessionDetail({ id }: { id: string }) {
           {d.transactions.length ? null : <p className="mu small">Tidak ada transaksi.</p>}
         </div>
       </div>
+      <RegistrationSection registration={d.registration} />
       <div className="card">
         <h2>Foto ({raw.length})</h2>
         <div className="photos">
