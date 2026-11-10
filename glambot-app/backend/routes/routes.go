@@ -200,6 +200,8 @@ func Setup(storagePath string) http.Handler {
 				r.Get("/sessions", handlers.AdminListSessions)
 				r.Get("/sessions/{id}", handlers.AdminGetSession)
 				r.Post("/sessions/{id}/reprint", handlers.AdminReprintSession)
+				r.Post("/sessions/{id}/email-foto/resend", handlers.AdminResendEmailFoto)
+				r.Delete("/sessions/{id}/registration", handlers.AdminDeleteRegistration)
 				r.Post("/password", handlers.AdminChangePassword)
 			})
 		})
