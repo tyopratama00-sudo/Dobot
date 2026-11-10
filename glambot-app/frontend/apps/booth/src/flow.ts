@@ -906,9 +906,9 @@ export function onIdleTimeout() {
         await flushEdits();
         await send({ type: 'auto_complete' });
       });
+    case 'finish': return finish();
+    case 'reset': return resetToWelcome();
   }
-  if (st === 'QR_READY') return finish();
-  if (st === 'FINISHED' || st === 'ERROR') return resetToWelcome();
 }
 
 /** prototype init(); go('welcome') */
