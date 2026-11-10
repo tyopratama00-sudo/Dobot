@@ -46,6 +46,14 @@ type Config struct {
 	GoogleClientSecret  string
 	GoogleRefreshToken  string
 	GoogleDriveFolderID string
+
+	// Gmail SMTP untuk email booth (Email Foto, email uji). Dianggap aktif
+	// hanya kalau SMTPUser & SMTPAppPassword terisi — lihat mailer.Configured.
+	SMTPUser        string // alamat Gmail booth, juga alamat pengirim
+	SMTPAppPassword string // App Password Google (butuh 2-step verification)
+	SMTPHost        string
+	SMTPPort        int
+	SMTPFromName    string // nama tampilan pengirim (opsional)
 }
 
 var App *Config
@@ -77,6 +85,11 @@ func Load() {
 		GoogleClientSecret:   getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRefreshToken:   getEnv("GOOGLE_REFRESH_TOKEN", ""),
 		GoogleDriveFolderID:  getEnv("GOOGLE_DRIVE_FOLDER_ID", ""),
+		SMTPUser:             getEnv("SMTP_USER", ""),
+		SMTPAppPassword:      getEnv("SMTP_APP_PASSWORD", ""),
+		SMTPHost:             getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:             getEnvInt("SMTP_PORT", 587),
+		SMTPFromName:         getEnv("SMTP_FROM_NAME", ""),
 	}
 
 	// Hardening: tolak start di production kalau secret/password masih default.
