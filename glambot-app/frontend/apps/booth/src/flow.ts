@@ -518,6 +518,30 @@ export function submitRegistration(name: string, email: string) {
   void guard('register', () => send({ type: 'register', name, email }));
 }
 
+/** Ubah email on the QR screen opened: the pelanggan gets the full QR time again. */
+export function openEmailChange() {
+  set({ timerFrom: Date.now() });
+}
+
+/**
+ * Save a corrected email from the QR screen. The backend decides the effect: a pending
+ * Email Foto goes to the new address, an already sent one is sent again. Resolves false
+ * when the save was rejected (the notice says why) and the dialog should stay open.
+ */
+export async function saveEmailChange(email: string): Promise<boolean> {
+  const name = get().session?.registration?.name;
+  if (!name) return false;
+  let saved = false;
+  await guard('email', async () => {
+    const registration = await api.saveRegistration(name, email);
+    const session = get().session;
+    if (session) set({ session: { ...session, registration } });
+    saved = true;
+  });
+  set({ timerFrom: Date.now() });
+  return saved;
+}
+
 /* ------------------------------------------------------------------ capture (prototype ready() + run()) */
 
 function setCapture(p: Partial<BoothState['capture']>) {

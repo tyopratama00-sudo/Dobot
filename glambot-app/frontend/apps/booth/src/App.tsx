@@ -177,6 +177,7 @@ function useTimer() {
         lastScreen = scr;
         since = Date.now();
       }
+      if (s.timerFrom > since) since = s.timerFrom;
       const show = (timer: BoothState['timer']) => (s.timer?.left !== timer?.left || s.timer?.mode !== timer?.mode) && set({ timer });
       const st = s.session?.status;
       const limit =
