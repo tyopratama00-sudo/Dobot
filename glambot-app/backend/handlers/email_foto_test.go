@@ -28,9 +28,9 @@ func emailFotoEnv(t *testing.T) *mailertest.Fake {
 	return configureEmail(t)
 }
 
-// registeredSession sesi lunas dengan Registrasi atas nama Rina, didaftarkan
+// emailFotoSession sesi lunas dengan Registrasi atas nama Rina, didaftarkan
 // pada t0 dan kedaluwarsa 72 jam kemudian (13 November 2026 10.00).
-func registeredSession(t *testing.T) string {
+func emailFotoSession(t *testing.T) string {
 	t.Helper()
 	id := paidSession(t)
 	if code, _, msg := saveRegistration(t, id, "Rina Putri", "rina@gmail.com"); code != 200 {
@@ -92,7 +92,7 @@ func delivery(t *testing.T, sessionID string) EmailFotoDelivery {
 func TestEmailFotoSendsLinkAndStripOnceDriveIsComplete(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 	composed(t, id, t0.Add(5*time.Minute))
 	driveFolder(t, id, true)
 
@@ -134,7 +134,7 @@ func TestEmailFotoSendsLinkAndStripOnceDriveIsComplete(t *testing.T) {
 func TestEmailFotoWaitsForDriveThenSendsStripOnlyAfterTenMinutes(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 	done := t0.Add(5 * time.Minute)
 	composed(t, id, done)
 	driveFolder(t, id, false) // folder ada, upload belum lengkap
@@ -166,7 +166,7 @@ func TestEmailFotoWaitsForDriveThenSendsStripOnlyAfterTenMinutes(t *testing.T) {
 
 func TestEmailFotoWithDriveDisabledSendsStripOnly(t *testing.T) {
 	fake := emailFotoEnv(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 	done := t0.Add(5 * time.Minute)
 	composed(t, id, done)
 	driveFolder(t, id, true) // sisa sesi lama: Drive sudah dimatikan
@@ -188,7 +188,7 @@ func TestEmailFotoWithDriveDisabledSendsStripOnly(t *testing.T) {
 func TestEmailFotoWithoutStripSendsLinkOnlyAfterTenQuietMinutes(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 	last := t0.Add(4 * time.Minute)
 	addPhoto(t, id, "raw", t0.Add(3*time.Minute))
 	addPhoto(t, id, "raw", last)
@@ -215,7 +215,7 @@ func TestEmailFotoWithoutStripSendsLinkOnlyAfterTenQuietMinutes(t *testing.T) {
 func TestEmailFotoSkippedWhenThereAreNoPhotos(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 
 	// Baru registrasi: foto masih akan diambil.
 	RunEmailFotoDispatch(t0.Add(5 * time.Minute))
@@ -236,7 +236,7 @@ func TestEmailFotoSkippedWhenThereAreNoPhotos(t *testing.T) {
 func readySession(t *testing.T) string {
 	t.Helper()
 	enableDrive(t)
-	id := registeredSession(t)
+	id := emailFotoSession(t)
 	composed(t, id, t0.Add(5*time.Minute))
 	driveFolder(t, id, true)
 	return id
@@ -404,7 +404,7 @@ func TestEmailFotoForgottenRecipientStopsAPendingSend(t *testing.T) {
 
 func TestEmailFotoSkippedWhenRawPhotosHaveNoLink(t *testing.T) {
 	fake := emailFotoEnv(t)
-	id := registeredSession(t) // Drive mati: foto raw tidak punya link
+	id := emailFotoSession(t) // Drive mati: foto raw tidak punya link
 	addPhoto(t, id, "raw", t0.Add(2*time.Minute))
 
 	RunEmailFotoDispatch(t0.Add(12 * time.Minute))
