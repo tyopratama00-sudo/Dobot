@@ -120,6 +120,29 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_name TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ`,
+		// Pengiriman Email Foto: satu catatan per sesi yang registrasi.
+		// status pending|sent|failed|skipped; content = isi yang terkirim
+		// (link_strip|strip|link). last_error = error terakhir atau alasan skip.
+		`CREATE TABLE IF NOT EXISTS email_deliveries (
+			session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+			recipient TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending'
+				CHECK (status IN ('pending', 'sent', 'failed', 'skipped')),
+			content TEXT NOT NULL DEFAULT ''
+				CHECK (content IN ('', 'link_strip', 'strip', 'link')),
+			attempts INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TIMESTAMPTZ,
+			last_error TEXT NOT NULL DEFAULT '',
+			sent_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_email_deliveries_pending ON email_deliveries (next_attempt_at) WHERE status = 'pending'`,
+		// Sesi yang sudah registrasi sebelum tabel ini ada ikut mendapat catatan.
+		`INSERT INTO email_deliveries (session_id, recipient)
+			SELECT id, registration_email FROM sessions
+			WHERE registered_at IS NOT NULL AND registration_email <> ''
+			ON CONFLICT (session_id) DO NOTHING`,
 		// Penanda foto raw yang sudah naik ke Drive (upload streaming per-capture)
 		// — cegah dobel-upload, finalize tinggal kirim sisanya.
 		`ALTER TABLE photos ADD COLUMN IF NOT EXISTS drive_uploaded BOOLEAN NOT NULL DEFAULT FALSE`,
