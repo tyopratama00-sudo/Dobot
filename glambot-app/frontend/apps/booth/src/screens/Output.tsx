@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { rp } from '@photobooth/shared';
 import { currentTemplate, useBooth, useFlatPhotos } from '../store';
 import { Frame } from '../components/Frame';
+import { EmailLine } from '../components/EmailChange';
 import { Bubble, HaloRobot, Icon, Pic, QrCode, Steps } from '../components/basics';
 import { back, confirmPrint, finish, resetToWelcome } from '../flow';
 
@@ -176,6 +177,7 @@ export function Qr() {
               </button>
             </div>
           </div>
+          <EmailLine />
           <p className="p" style={{ fontSize: 30 }}>
             {!session.quantity ? '' : printProblem ? 'Cetakanmu akan dibantu petugas.' : 'Cetakanmu sedang keluar dari mesin.'} {preview && !previewFailed ? 'Versi animasinya juga ikut di link QR.' : `Semua momen dari ${session.plan.angles} angle berganti di dalam frame.`}
           </p>

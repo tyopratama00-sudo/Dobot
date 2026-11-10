@@ -61,6 +61,8 @@ export interface BoothState {
   clientError: { code: string; message: string } | null;
   /** On-screen page time limit (none on the ready/session screens). */
   timer: { left: number; mode: 'limit' } | null;
+  /** The page timer counts from this time when it is later than the page opening (e.g. Ubah email on the QR screen). */
+  timerFrom: number;
 }
 
 export const useBooth = create<BoothState>(() => ({
@@ -92,6 +94,7 @@ export const useBooth = create<BoothState>(() => ({
   notice: null,
   clientError: null,
   timer: null,
+  timerFrom: 0,
 }));
 
 export const set = useBooth.setState;
