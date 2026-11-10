@@ -139,6 +139,16 @@ func cleanupSession(sessionID string) error {
 		tx.Rollback()
 		return err
 	}
+	// Registrasi tetap disimpan (catatan kunjungan), tapi Email Foto yang belum
+	// terkirim tidak akan pernah terkirim: fotonya baru saja dihapus.
+	if _, err := tx.Exec(`
+		UPDATE email_deliveries
+		SET status = 'failed', next_attempt_at = NULL, updated_at = NOW(),
+			last_error = CASE WHEN last_error = '' THEN 'sesi kedaluwarsa, foto sudah dihapus' ELSE last_error END
+		WHERE session_id = ? AND status = 'pending'`, sessionID); err != nil {
+		tx.Rollback()
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()

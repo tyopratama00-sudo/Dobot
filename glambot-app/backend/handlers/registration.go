@@ -67,6 +67,10 @@ func SaveSessionRegistration(w http.ResponseWriter, r *http.Request) {
 		respondInternal(w, "save registration", err)
 		return
 	}
+	if err := QueueEmailFoto(sessionID, email); err != nil {
+		respondInternal(w, "queue email foto", err)
+		return
+	}
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]any{
 		"session_id":    sessionID,
 		"name":          name,
