@@ -56,6 +56,7 @@ func Setup(storagePath string) http.Handler {
 			r.Get("/{sessionID}", handlers.GetSession)
 			r.Get("/create/{sessionID}", handlers.GetSession)
 			r.Patch("/{sessionID}/status", handlers.UpdateSessionStatus)
+			r.Put("/{sessionID}/registration", handlers.SaveSessionRegistration)
 			r.Patch("/create/{sessionID}/status", handlers.UpdateSessionStatus)
 		})
 

@@ -11,6 +11,7 @@ import {
   type HealthReport,
   type PhotoDTO,
   type PhotoTemplate,
+  type RegistrationDTO,
   type SessionCommand,
   type SessionCreated,
   type SessionSnapshot,
@@ -143,6 +144,8 @@ interface AppConfig {
   voucherChipEnabled?: boolean;
   voucherChipCode?: string;
   freeDigitalOnly?: boolean;
+  /** Already false when the booth email is not configured. */
+  registrationEnabled?: boolean;
   timeouts?: Partial<BoothConfig['timeouts']>;
   session?: { readySeconds?: number; retakeLimit?: number; maxQuantity?: number };
   display?: { brandLabel?: string; welcomeChip?: string };
@@ -214,6 +217,8 @@ class Api {
   private packageDurationSecs = 600;
   /** Admin-set per-session values (GET /api/config), copied into each new session plan. */
   private plan = { readySeconds: DEFAULT_SETTINGS.session.readySeconds, retakeLimit: 2 };
+  /** Admin "Registrasi pelanggan" (GET /api/config): `begin` goes to REGISTRATION instead of FRAME_SELECTION. */
+  private registrationOn = false;
   private listeners = new Set<(s: SessionSnapshot) => void>();
   private poll: ReturnType<typeof setInterval> | undefined;
   private paySeq = 0;
@@ -282,6 +287,7 @@ class Api {
     const { digicamUrl: _a, gphoto2Bin: _b, captureCommand: _c, previewUrl: _d, ...camera } = d.camera;
     const s = appConfig.session ?? {};
     this.plan = { readySeconds: s.readySeconds ?? d.session.readySeconds, retakeLimit: s.retakeLimit ?? 2 };
+    this.registrationOn = appConfig.registrationEnabled === true;
     return {
       pricing: { ...d.pricing, firstPrint: this.pkg.price + this.pkg.print_unit_price, additionalPrint: this.pkg.print_unit_price, maxQuantity: s.maxQuantity ?? d.pricing.maxQuantity },
       session: { ...d.session, shotsPerAngle: 1, ...this.plan },
@@ -298,6 +304,7 @@ class Api {
       voucherChip: appConfig.voucherChipEnabled !== false,
       voucherChipCode: appConfig.voucherChipCode || 'FREE FOTO',
       freeDigitalOnly: appConfig.freeDigitalOnly === true,
+      registration: this.registrationOn,
       environment: 'production',
     };
   }
@@ -505,6 +512,19 @@ class Api {
     await this.checkPayment();
     return { ok: true };
   }
+  /**
+   * Save or update the Registrasi on the paid Go session (PUT /api/session/{goId}/registration).
+   * The backend validates and normalises both fields; its 400/410 message is the user message.
+   * Also used to change the email later in the session (QR screen).
+   */
+  async saveRegistration(name: string, email: string): Promise<RegistrationDTO> {
+    if (!this.goId) throw new ApiError(404, 'NOT_FOUND', 'Sesi glambot tidak ditemukan', 'Sesi tidak ditemukan.');
+    const r = await go<{ name: string; email: string }>('PUT', `/api/session/${this.goId}/registration`, { name, email });
+    const registration = { name: r?.name ?? name, email: r?.email ?? email };
+    if (this.snap && this.st !== 'REGISTRATION') this.emit({ registration });
+    return registration;
+  }
+
   async uploadPhoto(..._args: unknown[]): Promise<SessionSnapshot> {
     throw new ApiError(400, 'UNSUPPORTED', 'Foto diambil oleh robot');
   }
@@ -565,7 +585,17 @@ class Api {
     switch (cmd.type) {
       case 'begin':
         // Paid: pick the frame first; its slot ratio drives the capture preview.
-        if (st !== 'PAYMENT_SUCCESS') return st === 'FRAME_SELECTION' || st === 'READY' ? s : invalid(st, cmd.type);
+        if (st !== 'PAYMENT_SUCCESS') return st === 'REGISTRATION' || st === 'FRAME_SELECTION' || st === 'READY' ? s : invalid(st, cmd.type);
+        return this.emit({ status: this.registrationOn ? 'REGISTRATION' : 'FRAME_SELECTION' });
+      case 'register': {
+        if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
+        const registration = await this.saveRegistration(cmd.name, cmd.email);
+        // Timed out while the request was in flight: saveRegistration already recorded it.
+        if (this.st !== 'REGISTRATION') return this.snap!;
+        return this.emit({ status: 'FRAME_SELECTION', registration });
+      }
+      case 'registration_timeout':
+        if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
         return this.emit({ status: 'FRAME_SELECTION' });
       case 'frame':
         if (st !== 'FRAME_SELECTION') return st === 'READY' ? s : invalid(st, cmd.type);

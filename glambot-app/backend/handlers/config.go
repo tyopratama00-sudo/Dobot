@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"photobooth/database"
+	"photobooth/mailer"
 )
 
 // Timer layar booth: disimpan di app_settings (key→value TEXT), fallback ke
@@ -22,6 +23,8 @@ const (
 	// Harga paket sebelum Mode Gratis (JSON id→harga). Ada = Mode Gratis aktif.
 	keyFreeModeBackup  = "free_mode_backup"
 	keyFreeDigitalOnly = "free_mode_digital_only"
+	// Registrasi pelanggan (default mati). Hanya bisa dinyalakan saat email booth diatur.
+	keyRegistrationEnabled = "registration_enabled"
 )
 
 type timerField struct {
@@ -42,6 +45,7 @@ var timerFields = []timerField{
 	{"thanksSeconds", "thanks_seconds", 60, 3, 600},
 	{"warningSeconds", "warning_seconds", 15, 3, 120},
 	{"errorResetSeconds", "error_reset_seconds", 90, 10, 3600},
+	{"registrationSeconds", "registration_seconds", 120, 15, 3600},
 }
 
 // Sesi booth: default = DEFAULT_SETTINGS (session.readySeconds/retakeLimit,
@@ -71,13 +75,16 @@ type timerConfig struct {
 	VoucherChipCode    string            `json:"voucherChipCode"`
 	FreeMode           bool              `json:"freeMode"`
 	FreeDigitalOnly    bool              `json:"freeDigitalOnly"`
+	// Admin: nilai tersimpan. Publik (GET /api/config): true hanya bila email
+	// booth juga diatur, supaya pelanggan tidak mengisi email yang tak terkirim.
+	RegistrationEnabled bool `json:"registrationEnabled"`
 }
 
 // loadTimerConfig membaca timer dari app_settings, mengisi default untuk key
 // yang belum ada / nilainya tidak valid.
 func loadTimerConfig() (timerConfig, error) {
 	cfg := timerConfig{Timeouts: map[string]int{}, Session: map[string]int{}, Display: map[string]string{}, VoucherChipEnabled: true, VoucherChipCode: defaultChipCode}
-	keys := []string{keyVoucherChip, keyVoucherChipCode, keyFreeModeBackup, keyFreeDigitalOnly}
+	keys := []string{keyVoucherChip, keyVoucherChipCode, keyFreeModeBackup, keyFreeDigitalOnly, keyRegistrationEnabled}
 	for _, f := range timerFields {
 		cfg.Timeouts[f.JSON] = f.Def
 		keys = append(keys, f.Key)
@@ -103,6 +110,7 @@ func loadTimerConfig() (timerConfig, error) {
 	}
 	_, cfg.FreeMode = values[keyFreeModeBackup]
 	cfg.FreeDigitalOnly = values[keyFreeDigitalOnly] == "1"
+	cfg.RegistrationEnabled = values[keyRegistrationEnabled] == "1"
 	for _, f := range timerFields {
 		if n, err := strconv.Atoi(values[f.Key]); err == nil && n >= f.Min && n <= f.Max {
 			cfg.Timeouts[f.JSON] = n
@@ -132,6 +140,7 @@ func GetAppConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.VoucherChipEnabled && !voucherUsable(cfg.VoucherChipCode) {
 		cfg.VoucherChipEnabled = false
 	}
+	cfg.RegistrationEnabled = cfg.RegistrationEnabled && mailer.Configured()
 	respondJSON(w, http.StatusOK, cfg)
 }
 
@@ -242,18 +251,19 @@ func upsertAppSettings(updates map[string]string) error {
 
 func AdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Timeouts           map[string]int    `json:"timeouts"`
-		Session            map[string]int    `json:"session"`
-		Display            map[string]string `json:"display"`
-		VoucherChipEnabled *bool             `json:"voucherChipEnabled"`
-		VoucherChipCode    *string           `json:"voucherChipCode"`
-		FreeDigitalOnly    *bool             `json:"freeDigitalOnly"`
+		Timeouts            map[string]int    `json:"timeouts"`
+		Session             map[string]int    `json:"session"`
+		Display             map[string]string `json:"display"`
+		VoucherChipEnabled  *bool             `json:"voucherChipEnabled"`
+		VoucherChipCode     *string           `json:"voucherChipCode"`
+		FreeDigitalOnly     *bool             `json:"freeDigitalOnly"`
+		RegistrationEnabled *bool             `json:"registrationEnabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "Body tidak valid")
 		return
 	}
-	if len(body.Timeouts) == 0 && len(body.Session) == 0 && len(body.Display) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil {
+	if len(body.Timeouts) == 0 && len(body.Session) == 0 && len(body.Display) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil && body.RegistrationEnabled == nil {
 		respondError(w, http.StatusBadRequest, "Tidak ada perubahan")
 		return
 	}
@@ -307,6 +317,13 @@ func AdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.FreeDigitalOnly != nil {
 		strUpdates[keyFreeDigitalOnly] = strconv.Itoa(boolToInt(*body.FreeDigitalOnly))
+	}
+	if body.RegistrationEnabled != nil {
+		if *body.RegistrationEnabled && !mailer.Configured() {
+			respondError(w, http.StatusConflict, "Registrasi pelanggan butuh email booth. Atur SMTP_USER dan SMTP_APP_PASSWORD di .env backend, restart, lalu coba lagi.")
+			return
+		}
+		strUpdates[keyRegistrationEnabled] = strconv.Itoa(boolToInt(*body.RegistrationEnabled))
 	}
 	if err := upsertAppSettings(strUpdates); err != nil {
 		respondInternal(w, "update app_settings", err)

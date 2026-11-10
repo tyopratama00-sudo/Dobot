@@ -63,6 +63,7 @@ export const settingsSchema = z.object({
     thanksSeconds: z.number().int().min(3).max(600),
     warningSeconds: z.number().int().min(3).max(120),
     errorResetSeconds: z.number().int().min(10).max(3600),
+    registrationSeconds: z.number().int().min(15).max(3600),
   }),
   camera: z.object({
     driver: z.enum(CAMERA_DRIVERS),
@@ -138,6 +139,7 @@ export const DEFAULT_SETTINGS: Settings = {
     thanksSeconds: 60,
     warningSeconds: 15,
     errorResetSeconds: 90,
+    registrationSeconds: 120,
   },
   camera: {
     driver: 'webcam',

@@ -1928,3 +1928,131 @@ img {
 #dm button.on {
   background: var(--ye);
 }
+
+/* Registrasi pelanggan: name + email on the on-screen keyboard */
+.reg-screen {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 26px;
+  padding: 56px 80px 40px;
+}
+.reg-head {
+  text-align: center;
+}
+.reg-head h1 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 64px;
+  text-transform: none;
+}
+.reg-fields {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 20px;
+  width: min(100%, 1640px);
+  align-items: stretch;
+}
+.reg-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 24px;
+  border: 3px solid rgba(43, 42, 76, 0.12);
+  border-radius: 22px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.reg-field.on {
+  border-color: var(--bl);
+  box-shadow: 0 0 0 6px rgba(91, 124, 250, 0.14);
+}
+.reg-field small {
+  color: var(--mu);
+  font: 600 22px 'Fredoka', sans-serif;
+}
+.reg-field span {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 38px 'Fredoka', sans-serif;
+}
+.reg-field span.ph {
+  color: rgba(43, 42, 76, 0.3);
+}
+.reg-caret {
+  display: inline-block;
+  width: 3px;
+  height: 40px;
+  margin-left: 2px;
+  vertical-align: -6px;
+  background: var(--bl);
+  animation: reg-blink 1s steps(1) infinite;
+}
+@keyframes reg-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.reg-next {
+  min-width: 240px;
+  font-size: 34px;
+}
+.osk {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 1640px);
+}
+.osk-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.osk-key {
+  flex: 1 1 0;
+  max-width: 128px;
+  min-height: 92px;
+  padding: 0;
+  border: 2px solid rgba(43, 42, 76, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  font: 600 38px 'Fredoka', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(43, 42, 76, 0.1);
+}
+.osk-key:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(43, 42, 76, 0.1);
+}
+.osk-key:disabled {
+  opacity: 0.5;
+}
+.osk-shift,
+.osk-backspace {
+  flex-grow: 1.6;
+  max-width: 200px;
+  font-size: 28px;
+}
+.osk-shift.on {
+  background: var(--bl);
+  color: #fff;
+}
+.osk-space {
+  flex-grow: 3;
+  max-width: 420px;
+  font-size: 28px;
+}
+.osk-shortcut {
+  flex-grow: 2;
+  max-width: 320px;
+  background: var(--soft);
+  font-size: 32px;
+}

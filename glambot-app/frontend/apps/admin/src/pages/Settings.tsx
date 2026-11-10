@@ -21,6 +21,7 @@ const TIMERS: Field[] = [
   ['frameSeconds', 'Pilih frame', 15, 3600, 1, 'detik'],
   ['pickSeconds', 'Pilih foto per slot', 15, 3600, 1, 'detik'],
   ['editingSeconds', 'Edit foto', 15, 3600, 1, 'detik'],
+  ['registrationSeconds', 'Registrasi pelanggan', 15, 3600, 1, 'detik'],
   ['finalSeconds', 'Preview akhir', 15, 3600, 1, 'detik'],
   ['qrSeconds', 'QR unduh', 10, 3600, 1, 'detik'],
   ['thanksSeconds', 'Terima kasih', 3, 600, 1, 'detik'],
@@ -66,6 +67,7 @@ export function Settings() {
         fields={DISPLAY}
       />
       <EmailSection />
+      <RegistrationSection />
       <Section
         title="Robot"
         hint="Langsung dikirim ke service dobot (tanpa restart). Turunkan kecepatan kalau gerak robot terlalu kasar."
@@ -132,6 +134,48 @@ function EmailSection() {
           {result.text}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RegistrationSection() {
+  const [settings, reload, err] = usePoll<{ registrationEnabled?: boolean }>(() => get('/api/admin/settings'));
+  const [email] = usePoll<{ configured: boolean }>(() => get('/api/admin/email'));
+  const [saving, setSaving] = useState(false);
+  const on = settings?.registrationEnabled === true;
+
+  const toggle = async (enabled: boolean) => {
+    setSaving(true);
+    try {
+      await patch('/api/admin/settings', { registrationEnabled: enabled });
+      toast(enabled ? 'Registrasi pelanggan aktif' : 'Registrasi pelanggan dimatikan');
+      await reload();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Registrasi pelanggan</h2>
+      <p className="mu small">
+        Setelah pembayaran (atau MULAI FOTO di mode gratis), pelanggan mengisi nama dan email untuk menerima Email Foto. Hanya bisa dinyalakan kalau
+        email booth sudah diatur. Berlaku saat booth kembali ke layar awal.
+      </p>
+      {err ? <div className="chip err">{err}</div> : null}
+      {on && email && !email.configured ? <div className="chip warn">Email belum diatur: layar registrasi tidak tampil di booth.</div> : null}
+      <label className="f" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={!settings || saving || (!on && email?.configured === false)}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Tampilkan layar registrasi di booth
+      </label>
+      {!on && email?.configured === false ? <p className="small">Atur email booth di bagian Email terlebih dulu.</p> : null}
     </div>
   );
 }
