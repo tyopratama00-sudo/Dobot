@@ -262,12 +262,15 @@ class Api {
   /* ---- boot */
 
   async config(): Promise<BoothConfig> {
-    const [pkgs, frames, paymentConfig, appConfig] = await Promise.all([
+    const appConfig = await go<AppConfig>('GET', '/api/config').catch((): AppConfig => ({ voucherChipEnabled: true, voucherChipCode: 'FREE FOTO', freeDigitalOnly: false }));
+    const [pkgs, frames, paymentConfig] = await Promise.all([
       go<GoPackage[]>('GET', '/api/package'),
       go<GoFrame[]>('GET', '/api/frames'),
       go<{ test_payment_enabled: boolean }>('GET', '/api/payment/config'),
-      go<AppConfig>('GET', '/api/config').catch((): AppConfig => ({ voucherChipEnabled: true, voucherChipCode: 'FREE FOTO', freeDigitalOnly: false })),
     ]);
+    // Free Mode rewrites every price at once: a switch between these reads would pair one mode with the other's prices.
+    const after = await this.mode().catch(() => appConfig);
+    if ((after.freeMode === true) !== (appConfig.freeMode === true)) return this.config();
     // Free mode zeroes every price, so a 0 print price must still pick the print package.
     const priced = pkgs.filter((p) => p.print_unit_price > 0 || p.price + p.print_unit_price === 0);
     this.pkg = priced.find((p) => p.is_popular) ?? pkgs.find((p) => p.code === 'vip') ?? priced[0] ?? pkgs[0] ?? null;
@@ -297,6 +300,11 @@ class Api {
       freeDigitalOnly: appConfig.freeDigitalOnly === true,
       environment: 'production',
     };
+  }
+
+  /** Just the admin mode flags: cheap enough to poll, unlike config(). */
+  mode(): Promise<Pick<AppConfig, 'freeMode' | 'freeDigitalOnly'>> {
+    return go<AppConfig>('GET', '/api/config');
   }
 
   async health() {

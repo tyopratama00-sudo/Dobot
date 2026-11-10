@@ -22,10 +22,13 @@ import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
 import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
-import { freeModeOutdated } from './payment-mode';
+import { canSwitchMode, freeModeOutdated, modeChanged, qtyAfterModeSwitch } from './payment-mode';
 import { MAX_STICKERS, type Sticker } from './stickers';
 import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
 import { timeoutAction } from './timeout-flow';
+
+/** How often the booth checks whether admin switched between free and paid mode. */
+export const MODE_POLL_MS = 3000;
 
 /** How long the paid ticket stays up before the session begins. */
 export const PAID_HOLD_MS = 4000;
@@ -121,6 +124,7 @@ export async function boot() {
   }, 15000);
   setInterval(() => void heartbeat(), 10000);
   void heartbeat();
+  setInterval(() => void syncMode(), MODE_POLL_MS);
 }
 
 export async function refreshHealth() {
@@ -319,6 +323,30 @@ async function guard(name: string, fn: () => Promise<unknown>) {
 /* ------------------------------------------------------------------ welcome & payment */
 
 let payTimer: ReturnType<typeof setTimeout> | undefined;
+/** payBusy stays on until the first request of a session, so it cannot tell whether one is running. */
+let paymentRequests = 0;
+let modeSyncing = false;
+
+const mayPickUpMode = () => canSwitchMode(get().session?.status, paymentRequests > 0 || !!get().busy);
+
+/** Apply a mode switch from admin as soon as the customer is somewhere it is safe to do so. */
+export async function syncMode() {
+  if (modeSyncing || !mayPickUpMode()) return;
+  modeSyncing = true;
+  try {
+    const mode = await api.mode();
+    if (!modeChanged(get().config, mode) || !mayPickUpMode()) return;
+    const config = await api.config();
+    // config() falls back to paid defaults if /api/config fails: never switch on that.
+    if (modeChanged(config, mode) || !mayPickUpMode()) return;
+    const s = get();
+    set({ config: { ...config, timingScale: s.config?.timingScale ?? config.timingScale }, qty: qtyAfterModeSwitch(s.config, config, s.qty), payError: null });
+  } catch {
+    /* backend unreachable: the next tick tries again */
+  } finally {
+    modeSyncing = false;
+  }
+}
 
 export async function startSession() {
   const s = get();
@@ -348,6 +376,7 @@ export async function startSession() {
 }
 
 async function requestPayment(q: number) {
+  paymentRequests++;
   set({ payBusy: true, payError: null });
   try {
     const st = get().session?.status;
@@ -374,6 +403,8 @@ async function requestPayment(q: number) {
     }
     set({ payBusy: false, payError: (e as ApiError).userMessage ?? 'Layanan pembayaran sedang sibuk. Coba lagi sebentar lagi.' });
     voice('pay_busy');
+  } finally {
+    paymentRequests--;
   }
 }
 
