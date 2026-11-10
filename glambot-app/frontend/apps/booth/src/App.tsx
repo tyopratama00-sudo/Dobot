@@ -22,6 +22,7 @@ import { timeoutWarningText } from './timeout-notification';
 const SCREEN_VOICE: Partial<Record<BoothScreen | 'maintenance', string[]>> = {
   maintenance: ['welcome_maint'],
   pay: ['pay_mode', 'pay_qty'],
+  register: ['reg_show'],
   ready: ['countdown'],
   review: ['review_show'],
   tpl: ['tpl_type'],

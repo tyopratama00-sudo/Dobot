@@ -1933,8 +1933,8 @@ img {
 .reg-screen {
   align-items: center;
   justify-content: flex-start;
-  gap: 26px;
-  padding: 56px 80px 40px;
+  gap: 18px;
+  padding: 56px 80px 32px;
 }
 .reg-head {
   text-align: center;
@@ -2003,6 +2003,59 @@ img {
 .reg-next {
   min-width: 240px;
   font-size: 34px;
+}
+.reg-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: min(100%, 1640px);
+  text-align: center;
+}
+.reg-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  max-width: 100%;
+}
+.reg-check p {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.reg-confirm {
+  color: var(--ink);
+  font: 600 30px 'Fredoka', sans-serif;
+}
+.reg-confirm b {
+  color: var(--bl);
+  font-size: 40px;
+}
+.reg-bad {
+  color: #d1495b;
+  font: 600 28px 'Fredoka', sans-serif;
+}
+.reg-suggest {
+  padding: 10px 28px;
+  border: 3px solid var(--ye);
+  border-radius: 999px;
+  background: #fff8d6;
+  color: var(--ink);
+  font: 600 32px 'Fredoka', sans-serif;
+  cursor: pointer;
+}
+.reg-suggest span {
+  margin-left: 10px;
+  color: var(--mu);
+  font-size: 24px;
+}
+.reg-why {
+  max-width: 1400px;
+  margin: 0;
+  color: var(--mu);
+  font: 500 22px/1.35 'Fredoka', sans-serif;
 }
 .osk {
   display: flex;
