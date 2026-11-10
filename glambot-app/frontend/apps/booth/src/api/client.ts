@@ -309,9 +309,10 @@ class Api {
     };
   }
 
-  /** Just the admin mode flags: cheap enough to poll, unlike config(). */
-  mode(): Promise<Pick<AppConfig, 'freeMode' | 'freeDigitalOnly'>> {
-    return go<AppConfig>('GET', '/api/config');
+  /** Just the admin switches the booth must follow live: cheap enough to poll, unlike config(). */
+  async mode(): Promise<{ freeMode: boolean; freeDigitalOnly: boolean; registration: boolean }> {
+    const c = await go<AppConfig>('GET', '/api/config');
+    return { freeMode: c.freeMode === true, freeDigitalOnly: c.freeDigitalOnly === true, registration: c.registrationEnabled === true };
   }
 
   async health() {

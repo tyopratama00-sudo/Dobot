@@ -164,3 +164,13 @@ test('failed check or a config that fell back to defaults changes nothing', asyn
   await syncMode();
   expect(get().config).toMatchObject({ freeMode: true, freeDigitalOnly: true });
 });
+
+test('registration switched on in admin reaches a booth that is already open', async () => {
+  set({ session: null } as never);
+  api.mode.mockResolvedValue({ freeMode: true, registration: true });
+  api.config.mockResolvedValue({ ...freeConfig, registration: true });
+
+  await syncMode();
+
+  expect(get().config).toMatchObject({ freeMode: true, registration: true });
+});

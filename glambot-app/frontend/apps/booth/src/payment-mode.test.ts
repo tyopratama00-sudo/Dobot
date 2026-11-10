@@ -32,3 +32,9 @@ test('print quantity follows the new mode', () => {
   expect(qtyAfterModeSwitch({ freeMode: true, freeDigitalOnly: true }, { freeMode: false }, 0)).toBe(1);
   expect(qtyAfterModeSwitch({ freeMode: false }, { freeMode: false }, 3)).toBe(3);
 });
+
+test('turning registration on or off counts as a change the booth must pick up', () => {
+  expect(modeChanged({ freeMode: true, registration: false }, { freeMode: true, registration: true })).toBe(true);
+  expect(modeChanged({ freeMode: true, registration: true }, { freeMode: true, registration: true })).toBe(false);
+  expect(modeChanged({ freeMode: false }, { freeMode: false, registration: false })).toBe(false);
+});

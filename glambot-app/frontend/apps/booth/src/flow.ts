@@ -1,4 +1,5 @@
 import {
+  activePhotos,
   applyEditOp,
   randomPick,
   CAPTURE_STATES,
@@ -29,6 +30,9 @@ import { timeoutAction } from './timeout-flow';
 
 /** How often the booth checks whether admin switched between free and paid mode. */
 export const MODE_POLL_MS = 3000;
+
+/** How long the "no photo" apology stays up before the booth returns to welcome. */
+export const NO_PHOTOS_RESET_MS = 8000;
 
 /** How long the paid ticket stays up before the session begins. */
 export const PAID_HOLD_MS = 4000;
@@ -252,6 +256,14 @@ function onEnterState(prevStatus: SessionState | null, next: SessionSnapshot, pa
       break;
     case 'FINAL_PREVIEW':
     case 'REVIEW':
+      // Robot or camera failed: there is nothing to pick, so frame/photo selection would wait forever.
+      if (next.status === 'REVIEW' && activePhotos(next.photos).length === 0) {
+        patch.clientError = { code: 'NO_PHOTOS', message: 'Maaf, foto gagal diambil. Silakan hubungi petugas, ya.' };
+        voice('err_general');
+        const t = tok;
+        setTimeout(() => t === tok && resetToWelcome(), NO_PHOTOS_RESET_MS);
+        break;
+      }
       if (next.templateId) patch.tplId = next.templateId;
       if (next.status === 'FINAL_PREVIEW' && (recovering || prevStatus !== 'EDITING'))
         patch.edits = Object.fromEntries(next.slots.map((x) => [x.slotIndex, x.edit]));

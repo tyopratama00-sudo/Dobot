@@ -34,6 +34,7 @@ export function ErrorScreen() {
   const resetAfter = useBooth((s) => s.config?.timeouts.errorResetSeconds ?? 90);
   const [canReset, setCanReset] = useState(false);
   const unpaid = !session || UNPAID_STATES.has(session.status);
+  const noPhotos = clientError?.code === 'NO_PHOTOS';
   useEffect(() => {
     const t = setTimeout(() => setCanReset(true), unpaid ? 0 : resetAfter * 1000);
     return () => clearTimeout(t);
@@ -41,10 +42,10 @@ export function ErrorScreen() {
   return (
     <div className="scr en booth-theme booth-center" style={{ alignItems: 'center', justifyContent: 'center', gap: 30, textAlign: 'center' }} data-testid="error-screen">
       <HaloRobot m="think" s={300} />
-      <span className="free-eyebrow"><span>✦</span> TENANG, FOTOMU AMAN <span>✦</span></span>
+      <span className="free-eyebrow"><span>✦</span> {noPhotos ? 'MAAF, YA' : 'TENANG, FOTOMU AMAN'} <span>✦</span></span>
       <h2>Ada kendala <em>kecil</em></h2>
       <div style={{ width: 1100 }}>
-        <Bubble small={session ? `Kode sesi: ${session.code} · fotomu tersimpan aman.` : undefined}>
+        <Bubble small={session ? (noPhotos ? `Kode sesi: ${session.code}` : `Kode sesi: ${session.code} · fotomu tersimpan aman.`) : undefined}>
           {clientError?.message ?? 'Petugas akan segera membantu. Mohon tunggu sebentar, ya.'}
         </Bubble>
       </div>
