@@ -180,9 +180,15 @@ func AdminGetSession(w http.ResponseWriter, r *http.Request) {
 		txs = append(txs, t)
 	}
 
+	emailFoto, err := emailFotoOf(id)
+	if err != nil {
+		respondInternal(w, "session email foto", err)
+		return
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{
 		"session": s, "photos": photos, "transactions": txs,
-		"registration": registrationOf(s),
+		"registration": registrationOf(s), "email_foto": emailFoto,
 	})
 }
 
