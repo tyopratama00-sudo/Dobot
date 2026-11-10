@@ -27,12 +27,17 @@ type adminSession struct {
 	DriveURL    string  `json:"drive_url"`
 	CreatedAt   string  `json:"created_at"`
 	CompletedAt *string `json:"completed_at,omitempty"`
+	// Registrasi melekat pada sesi (ADR 0001); kosong bila belum registrasi.
+	RegistrationName  string  `json:"registration_name"`
+	RegistrationEmail string  `json:"registration_email"`
+	RegisteredAt      *string `json:"registered_at"`
 }
 
 const sessionSelect = `s.id, COALESCE(p.name, s.package_code), s.price, s.discount, s.final_price,
 	s.print_count, s.status, COALESCE(f.name, ''),
 	(SELECT COUNT(*) FROM photos ph WHERE ph.session_id = s.id AND ph.type = 'raw'),
-	COALESCE(s.drive_url, ''), s.created_at, s.completed_at
+	COALESCE(s.drive_url, ''), s.created_at, s.completed_at,
+	s.registration_name, s.registration_email, s.registered_at
 	FROM sessions s
 	LEFT JOIN packages p ON p.id = s.package_id
 	LEFT JOIN frames f ON f.id = s.frame_id`
@@ -42,24 +47,35 @@ func scanSession(row interface{ Scan(...any) error }) (adminSession, error) {
 		s         adminSession
 		created   time.Time
 		completed sql.NullTime
+		reg       sql.NullTime
 	)
 	err := row.Scan(&s.ID, &s.Package, &s.Price, &s.Discount, &s.FinalPrice, &s.PrintCount,
-		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed)
+		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed,
+		&s.RegistrationName, &s.RegistrationEmail, &reg)
 	s.CreatedAt = created.Format(time.RFC3339)
 	if completed.Valid {
 		c := completed.Time.Format(time.RFC3339)
 		s.CompletedAt = &c
 	}
+	if reg.Valid {
+		at := reg.Time.Format(time.RFC3339)
+		s.RegisteredAt = &at
+	}
 	return s, err
 }
+
+// likeEscaper membuat %, _ dan \ pada kata pencarian dicocokkan apa adanya oleh ILIKE.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // GET /api/admin/sessions?search&status&from&to&page&limit
 func AdminListSessions(w http.ResponseWriter, r *http.Request) {
 	page, limit, offset := parsePaging(r)
 	where, args := []string{"1=1"}, []any{}
 	if q := queryParam(r, "search"); q != "" {
-		where = append(where, "s.id ILIKE ?")
-		args = append(args, "%"+q+"%")
+		// Cocok sebagian (tanpa beda huruf besar/kecil) pada id sesi, nama, atau email registrasi.
+		where = append(where, "(s.id ILIKE ? OR s.registration_name ILIKE ? OR s.registration_email ILIKE ?)")
+		like := "%" + likeEscaper.Replace(q) + "%"
+		args = append(args, like, like, like)
 	}
 	if st := queryParam(r, "status"); st != "" {
 		where = append(where, "s.status = ?")
@@ -92,7 +108,22 @@ func AdminListSessions(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, adminListResponse{Data: list, Meta: buildMeta(total, page, limit)})
 }
 
-// GET /api/admin/sessions/{id} → sesi + foto + transaksi
+// sessionRegistration adalah bagian "Registrasi & Email Foto" pada detail sesi.
+type sessionRegistration struct {
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	RegisteredAt string `json:"registered_at"`
+}
+
+// registrationOf mengembalikan nil bila sesi belum registrasi.
+func registrationOf(s adminSession) *sessionRegistration {
+	if s.RegisteredAt == nil {
+		return nil
+	}
+	return &sessionRegistration{Name: s.RegistrationName, Email: s.RegistrationEmail, RegisteredAt: *s.RegisteredAt}
+}
+
+// GET /api/admin/sessions/{id} → sesi + foto + transaksi + registrasi (null bila belum ada)
 func AdminGetSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	s, err := scanSession(database.DB.QueryRow(`SELECT `+sessionSelect+` WHERE s.id = ?`, id))
@@ -149,7 +180,10 @@ func AdminGetSession(w http.ResponseWriter, r *http.Request) {
 		txs = append(txs, t)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"session": s, "photos": photos, "transactions": txs})
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session": s, "photos": photos, "transactions": txs,
+		"registration": registrationOf(s),
+	})
 }
 
 // POST /api/admin/sessions/{id}/reprint {copies} — cetak ulang strip framed terbaru.
