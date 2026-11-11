@@ -7,6 +7,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_TEMPLATES,
   defaultEdit,
+  isTerminal,
   type BoothConfig,
   type HealthReport,
   type PhotoDTO,
@@ -330,7 +331,13 @@ class Api {
   async active(): Promise<{ session: SessionSnapshot | null; token: string | null }> {
     return { session: this.snap, token: this.snap ? (this.token ?? 'local') : null };
   }
+  /**
+   * flow.ts calls this every 10 s. While a paid Go session is on screen, tell the backend
+   * (POST /api/session/{goId}/heartbeat): the Email Foto dispatcher waits for the strip of a
+   * session the booth still shows, instead of treating it as stopped mid-way.
+   */
   async heartbeat(_body: unknown): Promise<{ ok: boolean; cameraFault: 'capture' | 'disconnect' | null }> {
+    if (this.goId && this.snap && !isTerminal(this.snap.status)) await go('POST', `/api/session/${this.goId}/heartbeat`, undefined, undefined, 5000).catch(() => undefined);
     return { ok: true, cameraFault: null };
   }
 

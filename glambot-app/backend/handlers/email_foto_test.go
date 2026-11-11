@@ -393,7 +393,7 @@ func TestEmailFotoResendToACorrectedAddress(t *testing.T) {
 func TestEmailFotoForgottenRecipientStopsAPendingSend(t *testing.T) {
 	fake := emailFotoEnv(t)
 	id := readySession(t)
-	if err := ForgetEmailFotoRecipient(id); err != nil {
+	if err := DeleteSessionRegistration(id); err != nil {
 		t.Fatal(err)
 	}
 	RunEmailFotoDispatch(t0.Add(6 * time.Minute))

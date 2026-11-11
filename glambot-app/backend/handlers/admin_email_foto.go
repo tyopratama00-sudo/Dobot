@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"photobooth/database"
 	"photobooth/mailer"
 	"photobooth/models"
 
@@ -73,7 +72,7 @@ func AdminResendEmailFoto(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "Sesi tidak ditemukan")
 		return
 	case errors.Is(err, ErrNoRegistration):
-		respondError(w, http.StatusConflict, "Sesi tidak punya email registrasi; isi alamat email")
+		respondError(w, http.StatusConflict, "Sesi tidak punya registrasi (atau datanya sudah dihapus); Kirim ulang tidak bisa dipakai")
 		return
 	case errors.Is(err, ErrEmailFotoPhotosGone):
 		respondError(w, http.StatusGone, "Foto sesi sudah dihapus, email tidak bisa dikirim lagi")
@@ -90,26 +89,15 @@ func AdminResendEmailFoto(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]any{"email_foto": ef}))
 }
 
-// DELETE /api/admin/sessions/{id}/registration — Hapus data registrasi:
-// nama, email dan nomor WhatsApp dikosongkan, Email Foto yang belum terkirim dihentikan.
-// Baris sesi, foto, dan transaksi tetap ada.
+// DELETE /api/admin/sessions/{id}/registration — Hapus data registrasi
+// (lihat DeleteSessionRegistration). Baris sesi, foto, dan transaksi tetap ada.
 func AdminDeleteRegistration(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var exists bool
-	if err := database.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM sessions WHERE id = ?)`, id).Scan(&exists); err != nil {
-		respondInternal(w, "find session", err)
-		return
-	}
-	if !exists {
+	switch err := DeleteSessionRegistration(id); {
+	case errors.Is(err, sql.ErrNoRows):
 		respondError(w, http.StatusNotFound, "Sesi tidak ditemukan")
 		return
-	}
-	// Hentikan pengiriman dulu supaya dispatcher tidak sempat memakai alamatnya.
-	if err := ForgetEmailFotoRecipient(id); err != nil {
-		respondInternal(w, "forget email foto", err)
-		return
-	}
-	if _, err := database.DB.Exec(`UPDATE sessions SET registration_name = '', registration_email = '', registration_whatsapp = '' WHERE id = ?`, id); err != nil {
+	case err != nil:
 		respondInternal(w, "delete registration", err)
 		return
 	}

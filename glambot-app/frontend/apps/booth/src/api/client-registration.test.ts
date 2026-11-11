@@ -140,3 +140,26 @@ test('reloading the booth during registration returns to the registration screen
   await reloaded.command({ type: 'register', name: 'Rina', email: 'rina@gmail.com' });
   expect(backend.registrations[0]?.url).toBe('/api/session/go-1/registration');
 });
+
+test('the booth heartbeat tells the backend the paid session is still on screen', async () => {
+  booth({});
+  const api = await paidSession(false);
+  await api.command({ type: 'begin' });
+  vi.mocked(fetch).mockClear();
+
+  await api.heartbeat({ sessionId: 'local' });
+
+  expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/session/go-1/heartbeat', expect.objectContaining({ method: 'POST' }));
+});
+
+test('no backend heartbeat before a session is paid', async () => {
+  booth({});
+  const api = await adapter();
+  await api.config();
+  await api.createSession();
+  vi.mocked(fetch).mockClear();
+
+  await api.heartbeat({ sessionId: 'local' });
+
+  expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+});

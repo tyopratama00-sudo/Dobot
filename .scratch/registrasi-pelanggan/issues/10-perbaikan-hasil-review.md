@@ -24,19 +24,19 @@ Expect conflicts in booth `flow.ts` / `api/client.ts` if you reuse it.
 - **Line endings.** Many files are CRLF; keep each file's line endings.
 
 ## Behaviour fixes (priority)
-- [ ] **A. Email Foto no-strip rule fires while the session is still in progress.** The dispatcher sends link-only or marks the delivery skipped after 10 minutes without a strip, even when the pelanggan is only idle on frame, pick or edit. The strip that arrives later is then never sent.
+- [x] **A. Email Foto no-strip rule fires while the session is still in progress.** The dispatcher sends link-only or marks the delivery skipped after 10 minutes without a strip, even when the pelanggan is only idle on frame, pick or edit. The strip that arrives later is then never sent.
   - Fix: apply the no-strip rules only once the session is really over.
   - Suggested signal: the booth heartbeat already reports the current `sessionId`. Treat the session as active while a recent heartbeat (for example under 2 minutes) names it.
-- [ ] **B. "Hapus data registrasi" is not atomic and can race the dispatcher.** A dispatcher round that already loaded the recipient still sends.
+- [x] **B. "Hapus data registrasi" is not atomic and can race the dispatcher.** A dispatcher round that already loaded the recipient still sends.
   - Fix: do the delete in one transaction.
   - Make the dispatcher claim or lock the delivery row and re-check the recipient before sending, so a delete or email change that commits first always wins.
-- [ ] **C. A deleted registration comes back.** The booth QR "Ubah email" (any registration PUT) re-creates the registration and queues a send.
+- [x] **C. A deleted registration comes back.** The booth QR "Ubah email" (any registration PUT) re-creates the registration and queues a send.
   - Fix: add an explicit "registration deleted" marker on the session, and refuse registration updates once it is set.
   - The booth shows a friendly message.
   - The marker also replaces the admin UI's guess from empty name and email.
-- [ ] **D. Kirim ulang creates registrations.** It works on sessions that never registered, or whose data was deleted, through `COALESCE(registered_at, NOW())`.
+- [x] **D. Kirim ulang creates registrations.** It works on sessions that never registered, or whose data was deleted, through `COALESCE(registered_at, NOW())`.
   - Fix: allow it only for sessions with a registration that was not deleted.
-- [ ] **E. `ResendEmailFoto` checks status and expiry outside its transaction.** Do the check under the row lock.
+- [x] **E. `ResendEmailFoto` checks status and expiry outside its transaction.** Do the check under the row lock.
 
 ## Smaller fixes
 - [ ] **F. Wrong skip reason.** With Drive off, no strip, but raw photos present, the reason says "tidak ada foto". Use an accurate one, such as "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif".

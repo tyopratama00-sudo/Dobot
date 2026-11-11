@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"html"
@@ -15,6 +16,7 @@ import (
 
 	"photobooth/database"
 	"photobooth/mailer"
+	"photobooth/models"
 	"photobooth/services"
 )
 
@@ -23,6 +25,13 @@ import (
 // oleh StartEmailFotoJob) mengirimnya begitu foto siap, mencoba ulang
 // kegagalan sementara sampai sesi kedaluwarsa, dan tidak pernah mengirim
 // setelah foto sesi dihapus.
+//
+// Penguncian: setiap penulis memakai urutan yang sama, baris sessions dulu
+// baru email_deliveries (registrasi, Hapus data registrasi, Kirim ulang,
+// cleanup). Dispatcher hanya mengunci baris email_deliveries, selama
+// memeriksa dan mengirim, lalu membaca ulang data sesi di bawah kunci itu.
+// Jadi hapus atau ganti email yang sudah commit lebih dulu selalu menang,
+// dan yang datang selagi email sedang dikirim menunggu sampai kirim selesai.
 
 // Status catatan pengiriman.
 const (
@@ -43,7 +52,13 @@ const (
 	emailFotoInterval = time.Minute
 	// Tunggu Drive sesudah sesi selesai (atau sesudah foto terakhir untuk sesi
 	// tanpa strip) sebelum mengirim tanpa link / menyerah soal foto.
-	emailFotoQuiet       = 10 * time.Minute
+	emailFotoQuiet = 10 * time.Minute
+	// Booth mengirim heartbeat berisi sesi yang sedang tampil tiap 10 detik
+	// (POST /api/session/{id}/heartbeat → sessions.last_seen_at). Sesi yang
+	// masih disebut dalam 2 menit terakhir masih berjalan (pelanggan mungkin
+	// sedang diam di layar frame/pilih foto/edit), jadi aturan "tanpa strip"
+	// belum boleh dipakai: strip masih bisa datang.
+	emailFotoBoothActive = 2 * time.Minute
 	emailFotoBatch       = 20
 	emailFotoSendTimeout = 90 * time.Second
 	defaultBoothName     = "Glambot Photo Booth"
@@ -60,8 +75,15 @@ var emailFotoRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * ti
 // bisa dikirim lagi.
 var ErrEmailFotoPhotosGone = errors.New("foto sesi sudah dihapus")
 
-// ErrNoRegistration: sesi tidak punya alamat email untuk dikirimi.
+// ErrNoRegistration: sesi tidak punya Registrasi (tidak pernah registrasi,
+// atau datanya sudah dihapus admin), jadi tidak ada yang bisa dikirimi.
 var ErrNoRegistration = errors.New("sesi tidak punya registrasi")
+
+// sqlRunner bagian dari database.DB / transaksi yang dipakai di sini.
+type sqlRunner interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
 
 // EmailFotoDelivery catatan pengiriman Email Foto satu sesi.
 type EmailFotoDelivery struct {
@@ -86,12 +108,13 @@ func GetEmailFotoDelivery(sessionID string) (EmailFotoDelivery, error) {
 	return d, err
 }
 
-// QueueEmailFoto dipanggil setiap Registrasi disimpan. Membuat catatan pending
-// untuk sesi baru. Alamat yang berubah selagi pending hanya mengganti penerima;
-// alamat yang berubah setelah terkirim (atau gagal/dilewati) mengantre
-// pengiriman baru ke alamat itu. Alamat yang sama tidak mengubah apa pun.
-func QueueEmailFoto(sessionID, email string) error {
-	_, err := database.DB.Exec(`
+// queueEmailFoto dipanggil setiap Registrasi disimpan (di dalam transaksinya).
+// Membuat catatan pending untuk sesi baru. Alamat yang berubah selagi pending
+// hanya mengganti penerima; alamat yang berubah setelah terkirim (atau
+// gagal/dilewati) mengantre pengiriman baru ke alamat itu. Alamat yang sama
+// tidak mengubah apa pun.
+func queueEmailFoto(q sqlRunner, sessionID, email string) error {
+	_, err := q.Exec(`
 		INSERT INTO email_deliveries (session_id, recipient) VALUES (?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			recipient = EXCLUDED.recipient,
@@ -109,20 +132,35 @@ func QueueEmailFoto(sessionID, email string) error {
 // ResendEmailFoto (Kirim ulang admin) mengembalikan pengiriman ke pending
 // dengan percobaan dari nol. email kosong = kirim ke alamat registrasi yang
 // ada; email terisi = alamat yang diperbaiki, sekaligus mengganti email
-// registrasi sesi. Pemanggil memvalidasi email (mailer.ValidAddress).
+// registrasi sesi. Pemanggil memvalidasi email (mailer.ValidAddress). Hanya
+// untuk sesi yang punya Registrasi yang belum dihapus; status dan
+// kedaluwarsa diperiksa di bawah kunci baris sesi.
 // Error: sql.ErrNoRows (sesi tidak ada), ErrNoRegistration,
 // ErrEmailFotoPhotosGone.
 func ResendEmailFoto(sessionID, email string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
-	var status, current string
-	var expires time.Time
-	if err := database.DB.QueryRow(
-		`SELECT status, expires_at, registration_email FROM sessions WHERE id = ?`, sessionID,
-	).Scan(&status, &expires, &current); err != nil {
+
+	tx, err := database.DB.Begin()
+	if err != nil {
 		return err
 	}
-	if status == "expired" || !expires.After(time.Now()) {
+	defer tx.Rollback()
+
+	var status models.SessionStatus
+	var expires time.Time
+	var registeredAt, deletedAt *time.Time
+	var current string
+	if err := tx.QueryRow(`
+		SELECT status, expires_at, registered_at, registration_deleted_at, registration_email
+		FROM sessions WHERE id = ? FOR UPDATE`, sessionID,
+	).Scan(&status, &expires, &registeredAt, &deletedAt, &current); err != nil {
+		return err
+	}
+	if status == models.StatusExpired || !expires.After(time.Now()) {
 		return ErrEmailFotoPhotosGone
+	}
+	if registeredAt == nil || deletedAt != nil {
+		return ErrNoRegistration
 	}
 	if email == "" {
 		email = current
@@ -131,14 +169,7 @@ func ResendEmailFoto(sessionID, email string) error {
 		return ErrNoRegistration
 	}
 
-	tx, err := database.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`
-		UPDATE sessions SET registration_email = ?, registered_at = COALESCE(registered_at, NOW())
-		WHERE id = ?`, email, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET registration_email = ? WHERE id = ?`, email, sessionID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
@@ -152,19 +183,36 @@ func ResendEmailFoto(sessionID, email string) error {
 	return tx.Commit()
 }
 
-// ForgetEmailFotoRecipient dipanggil saat data registrasi dihapus: alamat
-// penerima dikosongkan dan pengiriman yang masih pending dihentikan
-// (skipped, "data dihapus"). Status yang sudah final tetap tercatat.
-func ForgetEmailFotoRecipient(sessionID string) error {
-	_, err := database.DB.Exec(`
+// DeleteSessionRegistration (Hapus data registrasi admin), satu transaksi:
+// nama, email dan nomor WhatsApp dikosongkan, sesi ditandai registration_deleted_at, alamat
+// penerima Email Foto dikosongkan dan pengiriman yang masih pending dihentikan
+// (skipped, "data dihapus"). Status yang sudah final tetap tercatat. Baris
+// sesi, foto, dan transaksi tetap ada. sql.ErrNoRows kalau sesi tidak ada.
+func DeleteSessionRegistration(sessionID string) error {
+	tx, err := database.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var id string
+	if err := tx.QueryRow(`
+		UPDATE sessions SET registration_name = '', registration_email = '', registration_whatsapp = '',
+			registration_deleted_at = COALESCE(registration_deleted_at, NOW())
+		WHERE id = ? RETURNING id`, sessionID,
+	).Scan(&id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
 		UPDATE email_deliveries SET
 			recipient = '',
 			last_error = CASE WHEN status = 'pending' THEN ? ELSE last_error END,
 			status = CASE WHEN status = 'pending' THEN 'skipped' ELSE status END,
 			next_attempt_at = NULL,
 			updated_at = NOW()
-		WHERE session_id = ?`, reasonDataDeleted, sessionID)
-	return err
+		WHERE session_id = ?`, reasonDataDeleted, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // StartEmailFotoJob menjalankan dispatcher Email Foto tiap menit.
@@ -179,13 +227,16 @@ func StartEmailFotoJob() {
 	}()
 }
 
-// pendingEmailFoto satu pengiriman yang jatuh tempo beserta data sesinya.
+// pendingEmailFoto satu pengiriman yang jatuh tempo beserta data sesinya,
+// dibaca di bawah kunci baris pengirimannya.
 type pendingEmailFoto struct {
 	SessionID, Recipient, LastError string
 	Attempts                        int
-	SessionStatus, Name             string
+	SessionStatus                   models.SessionStatus
+	Name                            string
 	ExpiresAt                       time.Time
 	CompletedAt, RegisteredAt       *time.Time
+	LastSeenAt                      *time.Time
 	DriveURL                        string
 	DriveSynced                     bool
 }
@@ -207,49 +258,89 @@ func RunEmailFotoDispatch(now time.Time) {
 		return
 	}
 	booth := emailFotoBoothName()
-	for _, p := range due {
-		dispatchEmailFoto(m, booth, now, p)
+	for _, id := range due {
+		dispatchEmailFoto(m, booth, now, id)
 	}
 }
 
-func dueEmailFoto(now time.Time) ([]pendingEmailFoto, error) {
+// dueEmailFoto id sesi yang pengirimannya pending dan jatuh tempo. Datanya
+// dibaca ulang di bawah kunci oleh dispatchEmailFoto.
+func dueEmailFoto(now time.Time) ([]string, error) {
 	rows, err := database.DB.Query(`
-		SELECT d.session_id, d.recipient, d.last_error, d.attempts,
-		       s.status, s.registration_name, s.expires_at, s.completed_at, s.registered_at,
-		       s.drive_url, s.drive_synced
-		FROM email_deliveries d JOIN sessions s ON s.id = d.session_id
-		WHERE d.status = 'pending' AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
-		ORDER BY d.created_at
+		SELECT session_id FROM email_deliveries
+		WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		ORDER BY created_at
 		LIMIT ?`, now, emailFotoBatch)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []pendingEmailFoto
+	var out []string
 	for rows.Next() {
-		var p pendingEmailFoto
-		if err := rows.Scan(&p.SessionID, &p.Recipient, &p.LastError, &p.Attempts,
-			&p.SessionStatus, &p.Name, &p.ExpiresAt, &p.CompletedAt, &p.RegisteredAt,
-			&p.DriveURL, &p.DriveSynced); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
 
-func dispatchEmailFoto(m mailer.Mailer, booth string, now time.Time, p pendingEmailFoto) {
+// lockEmailFoto mengunci baris pengiriman sesi (masih pending dan jatuh
+// tempo) lalu membaca data sesinya yang terbaru. sql.ErrNoRows kalau
+// pengiriman sudah tidak pending (mis. data registrasi baru saja dihapus).
+func lockEmailFoto(tx *database.TxWrapper, sessionID string, now time.Time) (pendingEmailFoto, error) {
+	p := pendingEmailFoto{SessionID: sessionID}
+	if err := tx.QueryRow(`
+		SELECT recipient, last_error, attempts FROM email_deliveries
+		WHERE session_id = ? AND status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		FOR UPDATE`, sessionID, now,
+	).Scan(&p.Recipient, &p.LastError, &p.Attempts); err != nil {
+		return p, err
+	}
+	err := tx.QueryRow(`
+		SELECT status, registration_name, expires_at, completed_at, registered_at, last_seen_at,
+		       drive_url, drive_synced
+		FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&p.SessionStatus, &p.Name, &p.ExpiresAt, &p.CompletedAt, &p.RegisteredAt, &p.LastSeenAt,
+		&p.DriveURL, &p.DriveSynced)
+	return p, err
+}
+
+func dispatchEmailFoto(m mailer.Mailer, booth string, now time.Time, sessionID string) {
+	tx, err := database.DB.Begin()
+	if err != nil {
+		log.Printf("⚠️  email foto: gagal mulai transaksi (%s): %v", sessionID, err)
+		return
+	}
+	defer tx.Rollback()
+	p, err := lockEmailFoto(tx, sessionID, now)
+	if errors.Is(err, sql.ErrNoRows) {
+		return // sudah diputuskan di tempat lain sejak daftar dibaca
+	}
+	if err != nil {
+		log.Printf("⚠️  email foto: gagal baca pengiriman (%s): %v", sessionID, err)
+		return
+	}
+	commit := func() {
+		if err := tx.Commit(); err != nil {
+			log.Printf("⚠️  gagal simpan status email foto (%s): %v", sessionID, err)
+		}
+	}
+
 	// Foto sesi dihapus saat kedaluwarsa: setelah itu tidak ada yang dikirim.
-	if p.SessionStatus == "expired" || !now.Before(p.ExpiresAt) {
+	if p.SessionStatus == models.StatusExpired || !now.Before(p.ExpiresAt) {
 		reason := p.LastError
 		if reason == "" {
 			reason = reasonPhotosGone
 		}
-		finishEmailFoto(p.SessionID, EmailFotoFailed, reason)
+		finishEmailFoto(tx, sessionID, EmailFotoFailed, reason)
+		commit()
 		return
 	}
 	if p.Recipient == "" {
-		finishEmailFoto(p.SessionID, EmailFotoSkipped, reasonDataDeleted)
+		finishEmailFoto(tx, sessionID, EmailFotoSkipped, reasonDataDeleted)
+		commit()
 		return
 	}
 
@@ -258,7 +349,8 @@ func dispatchEmailFoto(m mailer.Mailer, booth string, now time.Time, p pendingEm
 		return
 	}
 	if content == "" {
-		finishEmailFoto(p.SessionID, EmailFotoSkipped, reasonNoPhotos)
+		finishEmailFoto(tx, sessionID, EmailFotoSkipped, reasonNoPhotos)
+		commit()
 		return
 	}
 
@@ -267,33 +359,35 @@ func dispatchEmailFoto(m mailer.Mailer, booth string, now time.Time, p pendingEm
 		msg.Attachments = []mailer.Attachment{*strip}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), emailFotoSendTimeout)
-	err := m.Send(ctx, msg)
+	err = m.Send(ctx, msg)
 	cancel()
 
 	attempts := p.Attempts + 1
 	switch {
 	case err == nil:
-		_, err = database.DB.Exec(`
-			UPDATE email_deliveries SET status = 'sent', content = ?, attempts = ?, sent_at = ?,
+		_, err = tx.Exec(`
+			UPDATE email_deliveries SET status = ?, content = ?, attempts = ?, sent_at = ?,
 				next_attempt_at = NULL, last_error = '', updated_at = NOW()
-			WHERE session_id = ? AND status = 'pending'`, content, attempts, now, p.SessionID)
-		log.Printf("📧 email foto terkirim (%s, %s)", p.SessionID, content)
+			WHERE session_id = ?`, EmailFotoSent, content, attempts, now, sessionID)
+		log.Printf("📧 email foto terkirim (%s, %s)", sessionID, content)
 	case mailer.IsPermanent(err):
-		_, err = database.DB.Exec(`
-			UPDATE email_deliveries SET status = 'failed', attempts = ?, last_error = ?,
+		_, err = tx.Exec(`
+			UPDATE email_deliveries SET status = ?, attempts = ?, last_error = ?,
 				next_attempt_at = NULL, updated_at = NOW()
-			WHERE session_id = ? AND status = 'pending'`, attempts, err.Error(), p.SessionID)
-		log.Printf("⚠️  email foto ditolak (%s)", p.SessionID)
+			WHERE session_id = ?`, EmailFotoFailed, attempts, err.Error(), sessionID)
+		log.Printf("⚠️  email foto ditolak (%s)", sessionID)
 	default:
 		next := now.Add(emailFotoRetryDelay(attempts))
-		_, err = database.DB.Exec(`
+		_, err = tx.Exec(`
 			UPDATE email_deliveries SET attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = NOW()
-			WHERE session_id = ? AND status = 'pending'`, attempts, err.Error(), next, p.SessionID)
-		log.Printf("⚠️  email foto gagal (%s), dicoba lagi %s", p.SessionID, next.Format("15:04"))
+			WHERE session_id = ?`, attempts, err.Error(), next, sessionID)
+		log.Printf("⚠️  email foto gagal (%s), dicoba lagi %s", sessionID, next.Format("15:04"))
 	}
 	if err != nil {
-		log.Printf("⚠️  gagal simpan status email foto (%s): %v", p.SessionID, err)
+		log.Printf("⚠️  gagal simpan status email foto (%s): %v", sessionID, err)
+		return
 	}
+	commit()
 }
 
 func emailFotoRetryDelay(attempts int) time.Duration {
@@ -303,10 +397,10 @@ func emailFotoRetryDelay(attempts int) time.Duration {
 	return emailFotoRetryDelays[attempts-1]
 }
 
-func finishEmailFoto(sessionID, status, reason string) {
-	if _, err := database.DB.Exec(`
+func finishEmailFoto(q sqlRunner, sessionID, status, reason string) {
+	if _, err := q.Exec(`
 		UPDATE email_deliveries SET status = ?, last_error = ?, next_attempt_at = NULL, updated_at = NOW()
-		WHERE session_id = ? AND status = 'pending'`, status, reason, sessionID); err != nil {
+		WHERE session_id = ? AND status = ?`, status, reason, sessionID, EmailFotoPending); err != nil {
 		log.Printf("⚠️  gagal simpan status email foto (%s): %v", sessionID, err)
 	}
 }
@@ -327,8 +421,14 @@ func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, stri
 		return "", nil, false
 	}
 
-	// Tanpa strip: tunggu sampai 10 menit tanpa foto baru (sesi berhenti di
-	// tengah jalan), dihitung dari registrasi kalau belum ada foto sama sekali.
+	// Tanpa strip: aturan ini hanya untuk sesi yang berhenti di tengah jalan.
+	// Selama booth masih menampilkan sesi (heartbeat baru), strip masih bisa
+	// datang.
+	if p.LastSeenAt != nil && now.Before(p.LastSeenAt.Add(emailFotoBoothActive)) {
+		return "", nil, false
+	}
+	// Lalu tunggu sampai 10 menit tanpa foto baru, dihitung dari registrasi
+	// kalau belum ada foto sama sekali.
 	var raws int
 	var lastRaw *time.Time
 	if err := database.DB.QueryRow(`

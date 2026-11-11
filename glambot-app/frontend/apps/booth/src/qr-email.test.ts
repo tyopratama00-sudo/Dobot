@@ -86,6 +86,17 @@ test('a rejected email change keeps the old email and tells the customer why', a
   expect(get().session?.registration).toEqual(registered);
 });
 
+test('an email change after the admin deleted the registration says so and drops the email line', async () => {
+  // Backend text for 403 is not shown to the pelanggan as-is; the booth uses its own words.
+  api.saveRegistration.mockRejectedValueOnce(new ApiError(403, 'HTTP_403', 'Data registrasi sesi ini sudah dihapus'));
+
+  const saved = await saveEmailChange('rina@gmail.com');
+
+  expect(saved).toBe(false);
+  expect(get().notice).toBe('Data registrasimu sudah dihapus petugas, jadi email tidak bisa diubah lagi. Fotomu tetap bisa diambil lewat QR ini, ya.');
+  expect(get().session?.registration ?? null).toBeNull();
+});
+
 test('the QR timeout still finishes the session after an email change', async () => {
   await saveEmailChange('rina@gmail.com');
 

@@ -34,14 +34,16 @@ type adminSession struct {
 	// Nomor WhatsApp ternormalisasi (mis. 6281234567890), kosong bila tidak diisi.
 	RegistrationWhatsApp string  `json:"registration_whatsapp"`
 	RegisteredAt         *string `json:"registered_at"`
-	expiresAt            time.Time
+	// Terisi bila admin menghapus data registrasi (nama, email, WhatsApp sudah kosong).
+	RegistrationDeletedAt *string `json:"registration_deleted_at"`
+	expiresAt             time.Time
 }
 
 const sessionSelect = `s.id, COALESCE(p.name, s.package_code), s.price, s.discount, s.final_price,
 	s.print_count, s.status, COALESCE(f.name, ''),
 	(SELECT COUNT(*) FROM photos ph WHERE ph.session_id = s.id AND ph.type = 'raw'),
 	COALESCE(s.drive_url, ''), s.created_at, s.completed_at,
-	s.registration_name, s.registration_email, s.registration_whatsapp, s.registered_at, s.expires_at
+	s.registration_name, s.registration_email, s.registration_whatsapp, s.registered_at, s.registration_deleted_at, s.expires_at
 	FROM sessions s
 	LEFT JOIN packages p ON p.id = s.package_id
 	LEFT JOIN frames f ON f.id = s.frame_id`
@@ -52,10 +54,11 @@ func scanSession(row interface{ Scan(...any) error }) (adminSession, error) {
 		created   time.Time
 		completed sql.NullTime
 		reg       sql.NullTime
+		regDel    sql.NullTime
 	)
 	err := row.Scan(&s.ID, &s.Package, &s.Price, &s.Discount, &s.FinalPrice, &s.PrintCount,
 		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed,
-		&s.RegistrationName, &s.RegistrationEmail, &s.RegistrationWhatsApp, &reg, &s.expiresAt)
+		&s.RegistrationName, &s.RegistrationEmail, &s.RegistrationWhatsApp, &reg, &regDel, &s.expiresAt)
 	s.CreatedAt = created.Format(time.RFC3339)
 	if completed.Valid {
 		c := completed.Time.Format(time.RFC3339)
@@ -64,6 +67,10 @@ func scanSession(row interface{ Scan(...any) error }) (adminSession, error) {
 	if reg.Valid {
 		at := reg.Time.Format(time.RFC3339)
 		s.RegisteredAt = &at
+	}
+	if regDel.Valid {
+		at := regDel.Time.Format(time.RFC3339)
+		s.RegistrationDeletedAt = &at
 	}
 	return s, err
 }
@@ -143,6 +150,8 @@ type sessionRegistration struct {
 	Email        string `json:"email"`
 	WhatsApp     string `json:"whatsapp"`
 	RegisteredAt string `json:"registered_at"`
+	// Waktu "Hapus data registrasi"; null bila datanya masih ada.
+	DeletedAt *string `json:"deleted_at"`
 	// WhatsAppLink = link wa.me dengan pesan siap kirim untuk tombol
 	// "Kirim via WhatsApp"; null bila tidak bisa, dengan alasannya di
 	// WhatsAppLinkReason.
@@ -156,7 +165,7 @@ func registrationOf(s adminSession, now time.Time) *sessionRegistration {
 		return nil
 	}
 	reg := &sessionRegistration{Name: s.RegistrationName, Email: s.RegistrationEmail,
-		WhatsApp: s.RegistrationWhatsApp, RegisteredAt: *s.RegisteredAt}
+		WhatsApp: s.RegistrationWhatsApp, RegisteredAt: *s.RegisteredAt, DeletedAt: s.RegistrationDeletedAt}
 	switch {
 	case s.RegistrationWhatsApp == "":
 		reg.WhatsAppLinkReason = "Belum ada nomor WhatsApp"

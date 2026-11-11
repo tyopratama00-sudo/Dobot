@@ -539,6 +539,9 @@ export function openEmailChange() {
   set({ timerFrom: Date.now() });
 }
 
+/** Shown when the admin deleted this session's Registrasi (backend answers 403). */
+const REGISTRATION_DELETED = 'Data registrasimu sudah dihapus petugas, jadi email tidak bisa diubah lagi. Fotomu tetap bisa diambil lewat QR ini, ya.';
+
 /**
  * Save a corrected email from the QR screen. The backend decides the effect: a pending
  * Email Foto goes to the new address, an already sent one is sent again. Resolves false
@@ -549,10 +552,18 @@ export async function saveEmailChange(email: string): Promise<boolean> {
   if (!name) return false;
   let saved = false;
   await guard('email', async () => {
-    const registration = await api.saveRegistration(name, email);
-    const session = get().session;
-    if (session) set({ session: { ...session, registration } });
-    saved = true;
+    try {
+      const registration = await api.saveRegistration(name, email);
+      const session = get().session;
+      if (session) set({ session: { ...session, registration } });
+      saved = true;
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 403)) throw e;
+      // 403: the admin deleted this Registrasi. The email line goes; the notice says why in plain words.
+      const session = get().session;
+      if (session) set({ session: { ...session, registration: null } });
+      throw new ApiError(e.status, e.code, e.message, REGISTRATION_DELETED, false);
+    }
   });
   set({ timerFrom: Date.now() });
   return saved;

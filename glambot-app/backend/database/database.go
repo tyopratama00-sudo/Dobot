@@ -123,6 +123,14 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		// Nomor WhatsApp opsional (sudah dinormalisasi, mis. 6281234567890);
 		// kosong = tidak diisi. Dipakai staf untuk kirim link foto manual.
 		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_whatsapp TEXT NOT NULL DEFAULT ''`,
+		// Waktu admin menekan "Hapus data registrasi". Terisi = registrasi
+		// dihapus: nama/email/WhatsApp kosong, booth tidak boleh mengisinya
+		// lagi, dan Kirim ulang ditolak. registered_at tetap sebagai riwayat.
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS registration_deleted_at TIMESTAMPTZ`,
+		// Heartbeat booth terakhir yang menyebut sesi ini (booth masih
+		// menampilkannya). Dispatcher Email Foto memakainya untuk tahu sesi
+		// tanpa strip belum selesai.
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
 		// Pengiriman Email Foto: satu catatan per sesi yang registrasi.
 		// status pending|sent|failed|skipped; content = isi yang terkirim
 		// (link_strip|strip|link). last_error = error terakhir atau alasan skip.

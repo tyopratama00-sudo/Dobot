@@ -28,6 +28,8 @@ interface Registration {
   /** Nomor WhatsApp ternormalisasi; '' bila tidak diisi. */
   whatsapp: string;
   registered_at: string;
+  /** Waktu "Hapus data registrasi"; null bila datanya masih ada. */
+  deleted_at: string | null;
   /** Link wa.me berisi pesan siap kirim; null bila belum bisa, alasannya di whatsapp_link_reason. */
   whatsapp_link: string | null;
   whatsapp_link_reason: string;
@@ -167,8 +169,8 @@ function RegistrationSection({
   const [email, setEmail] = useState(registration?.email ?? '');
   const { busy, run } = useAction();
   const path = `/api/admin/sessions/${encodeURIComponent(id)}`;
-  // Nama dan email dikosongkan oleh "Hapus data registrasi"; waktu registrasi tetap sebagai riwayat.
-  const deleted = !!registration && !registration.name && !registration.email;
+  // "Hapus data registrasi" mengosongkan nama, email, dan WhatsApp; waktu registrasi tetap sebagai riwayat.
+  const deleted = !!registration?.deleted_at;
 
   const resend = async () => {
     const to = email.trim() || registration?.email || '';
@@ -198,6 +200,7 @@ function RegistrationSection({
     ['WhatsApp', registration.whatsapp ? <span className="mono">+{registration.whatsapp}</span> : '—'],
     ['Waktu registrasi', dt(registration.registered_at)],
   ];
+  if (registration.deleted_at) rows.push(['Data dihapus', dt(registration.deleted_at)]);
   if (emailFoto) {
     rows.push(['Status Email Foto', <span className={`chip ${chip}`}>{label}</span>]);
     if (emailFoto.reason) rows.push([emailFoto.status === 'pending' ? 'Error terakhir' : 'Alasan', emailFoto.reason]);
