@@ -13,7 +13,7 @@ import { Lightbox, Review } from './screens/Review';
 import { Pick, Tpl } from './screens/Select';
 import { Edit } from './screens/Edit';
 import { Final, Print, Qr, Thanks } from './screens/Output';
-import { DevBar, ErrorScreen, Maintenance, Notice, ReconnectOverlay } from './screens/System';
+import { CrashGuard, DevBar, ErrorScreen, Maintenance, Notice, ReconnectOverlay } from './screens/System';
 import { Robot } from './components/basics';
 import { hush, printDoneCue, voice, voiceOnScreen } from './voice';
 import { api } from './api/client';
@@ -303,7 +303,9 @@ export function App() {
           ) : maintenance ? (
             <Maintenance />
           ) : (
-            <View key={screen} />
+            <CrashGuard>
+              <View key={screen} />
+            </CrashGuard>
           )}
         </div>
         <FloatingRobotHost />

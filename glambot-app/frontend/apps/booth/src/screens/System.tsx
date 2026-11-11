@@ -1,9 +1,38 @@
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState, type ReactNode } from 'react';
 import { UNPAID_STATES } from '@photobooth/shared';
 import { useBooth, set } from '../store';
 import { Bubble, HaloRobot, Robot } from '../components/basics';
 import { dev, resetToWelcome } from '../flow';
 import { devMode } from '../kiosk';
+import { APP_PROBLEM, NO_PHOTOS_PROBLEM, SAVE_PROBLEM } from '../customer-error';
+
+const CRASH_RELOAD_MS = 15000;
+
+/**
+ * Last line of defence: a render crash shows a friendly screen instead of a blank
+ * kiosk, then reloads (the session is restored from localStorage).
+ */
+export class CrashGuard extends Component<{ children: ReactNode }, { crashed: boolean }> {
+  state = { crashed: false };
+  static getDerivedStateFromError() {
+    return { crashed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error('[booth] screen crashed:', error);
+    setTimeout(() => location.reload(), CRASH_RELOAD_MS);
+  }
+  render() {
+    if (!this.state.crashed) return this.props.children;
+    return (
+      <div className="scr en booth-theme booth-center" style={{ alignItems: 'center', justifyContent: 'center', gap: 30, textAlign: 'center' }} data-testid="crash-screen">
+        <h2>Ada kendala <em>kecil</em></h2>
+        <p className="p" style={{ fontSize: 40, maxWidth: 1100 }}>{APP_PROBLEM.message}</p>
+        <StaffHelp code={APP_PROBLEM.code} />
+        <button className="btn pr" onClick={() => location.reload()}>MUAT ULANG</button>
+      </div>
+    );
+  }
+}
 
 /** Maintenance screen (critical hardware down) — same visual identity. */
 export function Maintenance() {
@@ -27,6 +56,16 @@ export function Maintenance() {
   );
 }
 
+/** "Ask staff" chip with a short code staff can look up (raw error is in the console / print.error). */
+export function StaffHelp({ code, sessionCode }: { code: string; sessionCode?: string }) {
+  return (
+    <div className="chip" style={{ position: 'relative', fontSize: 30 }} data-testid="staff-help">
+      🙋 Hubungi petugas · Kode kendala: <b style={{ marginLeft: 8 }}>{code}</b>
+      {sessionCode ? <span style={{ marginLeft: 16, opacity: 0.7 }}>· Sesi {sessionCode}</span> : null}
+    </div>
+  );
+}
+
 /** User-friendly error screen (never a stack trace). */
 export function ErrorScreen() {
   const session = useBooth((s) => s.session);
@@ -35,6 +74,13 @@ export function ErrorScreen() {
   const [canReset, setCanReset] = useState(false);
   const unpaid = !session || UNPAID_STATES.has(session.status);
   const noPhotos = clientError?.code === 'NO_PHOTOS';
+  // Session-level failure (e.g. saving the frame) carries its own customer message.
+  const sessionFailed = session?.status === 'ERROR';
+  const problem = noPhotos
+    ? NO_PHOTOS_PROBLEM
+    : sessionFailed
+      ? { ...SAVE_PROBLEM, message: session.print?.userMessage ?? SAVE_PROBLEM.message }
+      : { code: clientError?.code ?? 'SISTEM-01', message: clientError?.message ?? `Petugas akan segera membantu. Mohon tunggu sebentar, ya.` };
   useEffect(() => {
     const t = setTimeout(() => setCanReset(true), unpaid ? 0 : resetAfter * 1000);
     return () => clearTimeout(t);
@@ -45,10 +91,9 @@ export function ErrorScreen() {
       <span className="free-eyebrow"><span>✦</span> {noPhotos ? 'MAAF, YA' : 'TENANG, FOTOMU AMAN'} <span>✦</span></span>
       <h2>Ada kendala <em>kecil</em></h2>
       <div style={{ width: 1100 }}>
-        <Bubble small={session ? (noPhotos ? `Kode sesi: ${session.code}` : `Kode sesi: ${session.code} · fotomu tersimpan aman.`) : undefined}>
-          {clientError?.message ?? 'Petugas akan segera membantu. Mohon tunggu sebentar, ya.'}
-        </Bubble>
+        <Bubble small={session && !noPhotos ? 'Foto yang sudah diambil tersimpan aman.' : undefined}>{problem.message}</Bubble>
       </div>
+      <StaffHelp code={problem.code} sessionCode={session?.code} />
       {canReset ? (
         <button className="btn pr" style={{ marginTop: 20 }} onClick={resetToWelcome}>
           KEMBALI KE AWAL

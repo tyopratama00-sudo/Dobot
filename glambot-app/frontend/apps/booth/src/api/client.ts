@@ -19,6 +19,7 @@ import {
   type SessionState,
 } from '@photobooth/shared';
 import { composeFrame } from '../compose';
+import { customerFacingStatus, printProblem, SAVE_PROBLEM } from '../customer-error';
 // ponytail: stickers live only in the booth store (not the session snapshot), so a booth reload drops them; add to SlotDTO/session if needed.
 import { get } from '../store';
 
@@ -130,7 +131,8 @@ async function go<T>(method: string, path: string, body?: unknown, form?: FormDa
   reportNetwork(true);
   if (!res.ok || j?.success === false) {
     const msg = j?.error || res.statusText || `HTTP ${res.status}`;
-    throw new ApiError(res.status, `HTTP_${res.status}`, msg, msg, res.status >= 500);
+    // Only validation-style messages reach the customer; the raw text stays in .message for logs.
+    throw new ApiError(res.status, `HTTP_${res.status}`, msg, customerFacingStatus(res.status) ? msg : undefined, res.status >= 500);
   }
   return (j && typeof j === 'object' && 'data' in j ? j.data : j) as T;
 }
@@ -736,7 +738,7 @@ class Api {
       links = galleryLinks(goId, composed?.preview_url);
       if (this.snap!.quantity > 0) this.emit({ status: 'PRINTING', print: { ...this.snap!.print!, status: 'PRINTING', progress: 30 } });
     } catch (e) {
-      if (alive()) this.emit({ status: 'ERROR', print: { ...this.snap!.print!, status: 'FAILED', error: (e as Error).message, userMessage: 'Gagal menyimpan foto.' } });
+      if (alive()) this.emit({ status: 'ERROR', print: { ...this.snap!.print!, status: 'FAILED', error: (e as Error).message, userMessage: SAVE_PROBLEM.message } });
       return;
     }
     try {
@@ -749,8 +751,10 @@ class Api {
       }
     } catch (e) {
       if (!alive()) return;
+      // Raw printer error stays in print.error for staff; the customer gets plain words.
       const msg = (e as Error).message;
-      this.emit({ status: 'PRINT_FAILED', print: { ...this.snap!.print!, status: 'FAILED', error: msg, userMessage: msg } });
+      console.warn('[print] failed:', msg);
+      this.emit({ status: 'PRINT_FAILED', print: { ...this.snap!.print!, status: 'FAILED', error: msg, userMessage: printProblem(msg).message } });
     }
     const { url, preview } = await links!;
     if (alive()) this.emit({ status: 'QR_READY', gallery: { url, preview, expiresAt: new Date(Date.now() + 864e5).toISOString() } });
