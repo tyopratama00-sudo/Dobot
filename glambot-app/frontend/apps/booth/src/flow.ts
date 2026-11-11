@@ -20,6 +20,7 @@ import {
   type SessionState,
 } from '@photobooth/shared';
 import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api/client';
+import { CALL_STAFF, customerMessage, NO_PHOTOS_PROBLEM } from './customer-error';
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
 import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
@@ -259,7 +260,7 @@ function onEnterState(prevStatus: SessionState | null, next: SessionSnapshot, pa
     case 'REVIEW':
       // Robot or camera failed: there is nothing to pick, so frame/photo selection would wait forever.
       if (next.status === 'REVIEW' && activePhotos(next.photos).length === 0) {
-        patch.clientError = { code: 'NO_PHOTOS', message: 'Maaf, foto gagal diambil. Silakan hubungi petugas, ya.' };
+        patch.clientError = { code: 'NO_PHOTOS', message: NO_PHOTOS_PROBLEM.message };
         voice('err_general');
         const t = tok;
         setTimeout(() => t === tok && resetToWelcome(), NO_PHOTOS_RESET_MS);
@@ -323,7 +324,8 @@ async function guard(name: string, fn: () => Promise<unknown>) {
     await fn();
   } catch (e) {
     if (isAbort(e)) return;
-    const msg = (e as ApiError).userMessage ?? (e instanceof NetworkError ? e.userMessage : 'Terjadi kendala. Coba lagi, ya.');
+    console.warn(`[booth] ${name} failed:`, e);
+    const msg = customerMessage(e);
     robot.say(msg, 2600);
     voice('err_general');
     set({ notice: msg });
@@ -381,7 +383,11 @@ export async function startSession() {
     set({ entering: false, payBusy: false, session: null });
     api.clear();
     if (e instanceof ApiError && e.code === 'MAINTENANCE') await refreshHealth();
-    else robot.say((e as ApiError).userMessage ?? 'Sistem sedang menyambung ulang…', 2500);
+    else {
+      console.warn('[booth] start session failed:', e);
+      // No active package, backend down, …: nothing the customer can fix.
+      robot.say(customerMessage(e, `Booth belum siap dipakai. ${CALL_STAFF}`), 3500);
+    }
     return;
   }
   await anim;
@@ -414,7 +420,8 @@ async function requestPayment(q: number) {
       set({ payBusy: false });
       return;
     }
-    set({ payBusy: false, payError: (e as ApiError).userMessage ?? 'Layanan pembayaran sedang sibuk. Coba lagi sebentar lagi.' });
+    console.warn('[booth] payment failed:', e);
+    set({ payBusy: false, payError: customerMessage(e, `Layanan pembayaran sedang sibuk. Coba lagi sebentar. Jika masih gagal, ${CALL_STAFF.toLowerCase()}`) });
     voice('pay_busy');
   } finally {
     paymentRequests--;
@@ -501,7 +508,7 @@ export async function simulateMockPayment() {
   try {
     await api.mockPay(orderId);
   } catch (e) {
-    set({ payError: (e as ApiError).userMessage ?? 'Pembayaran demo gagal. Coba lagi.' });
+    set({ payError: customerMessage(e, 'Pembayaran demo gagal. Coba lagi.') });
   } finally {
     set({ payBusy: false });
   }
@@ -607,7 +614,8 @@ async function runSession(retakeAngle: number | null) {
     await runCapture(t, retakeAngle);
   } catch (e) {
     if (!isAbort(e)) {
-      set({ notice: (e as ApiError).userMessage ?? 'Terjadi kendala.' });
+      console.warn('[booth] capture failed:', e);
+      set({ notice: customerMessage(e, `Robot atau kamera sedang terkendala. ${CALL_STAFF}`) });
       await resync();
     }
   } finally {

@@ -6,9 +6,14 @@ import '@fontsource/fredoka/700.css';
 import '@photobooth/ui/prototype.css';
 import './styles/booth.css';
 import { App } from './App';
+import { CrashGuard } from './screens/System';
 import { installKioskGuards, captureDeviceKey } from './kiosk';
 
 captureDeviceKey();
 installKioskGuards();
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(
+  <CrashGuard>
+    <App />
+  </CrashGuard>,
+);

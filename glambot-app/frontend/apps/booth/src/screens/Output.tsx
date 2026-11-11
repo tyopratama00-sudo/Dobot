@@ -5,6 +5,8 @@ import { Frame } from '../components/Frame';
 import { EmailLine } from '../components/EmailChange';
 import { Bubble, HaloRobot, Icon, Pic, QrCode, Steps } from '../components/basics';
 import { back, confirmPrint, finish, resetToWelcome } from '../flow';
+import { CALL_STAFF, printProblem } from '../customer-error';
+import { StaffHelp } from './System';
 
 function useFrameSlots() {
   const t = useBooth(currentTemplate);
@@ -104,16 +106,18 @@ export function Print() {
   }, [target]);
 
   if (failed) {
+    const problem = printProblem(job?.error);
     return (
       <div className="scr en booth-theme booth-center" style={{ alignItems: 'center', justifyContent: 'center', gap: 34, textAlign: 'center' }} data-testid="print-failed">
         <HaloRobot m="think" s={300} />
         <span className="free-eyebrow"><span>✦</span> TENANG, FOTOMU AMAN <span>✦</span></span>
         <h2>Cetakan <em>tertunda</em></h2>
         <div style={{ width: 1100 }}>
-          <Bubble small="Tenang, fotomu aman. Petugas akan mencetak ulang untukmu. Foto digital tetap bisa diambil lewat QR.">
-            {job?.userMessage ?? 'Printer sedang bermasalah.'}
+          <Bubble small="Petugas akan mencetak ulang untukmu. Foto digital tetap bisa diambil lewat QR.">
+            {problem.message} {CALL_STAFF}
           </Bubble>
         </div>
+        <StaffHelp code={problem.code} sessionCode={session.code} />
         <footer className="free-footer"><span>ROBOT PHOTOBOOTH</span><i /> CETAK</footer>
       </div>
     );

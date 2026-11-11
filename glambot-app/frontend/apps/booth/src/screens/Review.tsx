@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { p2, retakesLeft } from '@photobooth/shared';
-import { flatPhotos, slotRatio, useBooth } from '../store';
+import { flatPhotos, useBooth } from '../store';
 import { fitCards, fitGrid } from '../fitGrid';
 import { Icon, Pic, Steps } from '../components/basics';
 import { closeLightbox, retake, tapReviewPhoto, toFrames } from '../flow';
@@ -12,7 +12,6 @@ export function Review() {
   const flatCount = useBooth((s) => flatPhotos(s).length);
   const { angles, shotsPerAngle, retakeLimit } = session.plan;
   const left = retakesLeft(session.retakenAngles, retakeLimit);
-  const ratio = useBooth(slotRatio);
 
   // Card grid follows the screen: pick the cols/rows that give the biggest photo.
   const box = useRef<HTMLDivElement>(null);
@@ -27,15 +26,16 @@ export function Review() {
     return () => ro.disconnect();
   }, []);
   const chromeH = CARD_PAD_Y * 2 + HEAD_H + IN_GAP + (left ? BTN_H + IN_GAP : 0);
-  // Card shape follows the frame's slot ratio and how many photos sit in it (side by side or stacked).
-  const g = fitCards(angles, shotsPerAngle, size.w, size.h, ratio, GRID_GAP, CARD_PAD_X * 2, chromeH, 60, MIN_CARD_W);
+  // Review only: cards and their thumbnails use one fixed ratio so every frame (group, 4-photo,
+  // 6-photo) looks the same; thumbnails are cropped (object-fit: cover) to fill the card.
+  const g = fitCards(angles, shotsPerAngle, size.w, size.h, CARD_RATIO, GRID_GAP, CARD_PAD_X * 2, chromeH, 60, MIN_CARD_W);
   const areaW = Math.floor(g.frameH * g.areaRatio);
   const areaH = g.frameH;
   const short = areaW < 340;
   /** 1 photo fills the area; 2+ split it (side by side or stacked, whichever is bigger). */
   const thumb = (n: number) => {
-    const f = fitGrid(Math.max(1, n), areaW, areaH, ratio, PHOTO_GAP, 0, 0, 0);
-    return { cols: f.cols, h: f.frameH, w: Math.floor(f.frameH * ratio) };
+    const f = fitGrid(Math.max(1, n), areaW, areaH, CARD_RATIO, PHOTO_GAP, 0, 0, 0);
+    return { cols: f.cols, h: f.frameH, w: Math.floor(f.frameH * CARD_RATIO) };
   };
   return (
     <div className="scr en booth-theme" style={{ paddingTop: 40, paddingBottom: 56 }}>
@@ -107,6 +107,8 @@ const BTN_H = 60;
 const IN_GAP = 12;
 const PHOTO_GAP = 10;
 const MIN_CARD_W = 260;
+/** Photo-area ratio used to size cards, independent of the chosen frame. */
+const CARD_RATIO = 4 / 3;
 
 /** Review photo enlarged (prototype S.big overlay) */
 export function Lightbox() {
