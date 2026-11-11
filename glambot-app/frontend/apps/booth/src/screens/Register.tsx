@@ -2,26 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { useBooth } from '../store';
 import { submitRegistration } from '../flow';
 import { canSubmitRegistration, isValidEmail, suggestEmail } from '../email';
+import { isValidWhatsApp } from '../whatsapp';
 import { voice } from '../voice';
 import { pressKey } from '../keyboard';
 import { OnScreenKeyboard } from '../components/OnScreenKeyboard';
 import { Icon } from '../components/basics';
 
-type Field = 'name' | 'email';
-const MAX: Record<Field, number> = { name: 80, email: 254 };
+type Field = 'name' | 'email' | 'whatsapp';
+const MAX: Record<Field, number> = { name: 80, email: 254, whatsapp: 24 };
 /** The typo voice waits for a pause in typing, so "gmail.c" on the way to "gmail.com" stays quiet. */
 const TYPO_VOICE_MS = 1500;
 
-/** Registrasi: name + email typed on the on-screen keyboard, between the paid ticket and frame selection. No skip button. */
+/**
+ * Registrasi: name + email (+ optional WhatsApp number) typed on the on-screen keyboard,
+ * between the paid ticket and frame selection. No skip button.
+ */
 export function Registration() {
   const busy = useBooth((s) => s.busy);
-  const [values, setValues] = useState<Record<Field, string>>({ name: '', email: '' });
+  const [values, setValues] = useState<Record<Field, string>>({ name: '', email: '', whatsapp: '' });
   const [field, setField] = useState<Field>('name');
   // Names start with a capital letter; email stays lowercase.
   const [shift, setShift] = useState(true);
-  const ready = canSubmitRegistration(values.name, values.email);
+  const ready = canSubmitRegistration(values.name, values.email, values.whatsapp);
   const email = values.email.trim();
   const validEmail = isValidEmail(email);
+  const badWhatsApp = !isValidWhatsApp(values.whatsapp);
   const suggestion = suggestEmail(email);
   // Robot mentions a likely typo once per visit, after the pelanggan stops typing.
   const typoSpoken = useRef(false);
@@ -64,10 +69,11 @@ export function Registration() {
       <div className="reg-fields">
         {box('name', 'Nama', 'Nama kamu')}
         {box('email', 'Email', 'nama@gmail.com')}
+        {box('whatsapp', 'No. WhatsApp (opsional)', '0812 3456 7890')}
         <button
           className={`btn pr reg-next ${busy === 'register' ? 'wait' : ''}`}
           disabled={!ready || !!busy}
-          onClick={() => submitRegistration(values.name.trim(), values.email.trim())}
+          onClick={() => submitRegistration(values.name.trim(), values.email.trim(), values.whatsapp.trim())}
           data-testid="reg-next"
           data-avoid
         >
@@ -87,6 +93,10 @@ export function Registration() {
             >
               Maksudmu <b>@{suggestion.split('@')[1]}</b>? <span>Ketuk untuk ganti</span>
             </button>
+          ) : badWhatsApp ? (
+            <p className="reg-bad" data-testid="reg-bad-whatsapp">
+              Nomor WhatsApp belum benar. Contoh: 0812 3456 7890, atau kosongkan saja
+            </p>
           ) : validEmail ? (
             <p className="reg-confirm" data-testid="reg-confirm">
               Foto akan dikirim ke: <b>{email}</b>
@@ -98,10 +108,10 @@ export function Registration() {
           ) : null}
         </div>
         <p className="reg-why">
-          Email hanya dipakai untuk mengirim foto sesi ini, sebagai cadangan kalau kamu lupa scan QR, dan disimpan sebagai catatan kunjungan. Dengan menekan Lanjut, kamu setuju.
+          Email dan WhatsApp hanya dipakai untuk mengirim foto sesi ini (WhatsApp dikirim oleh staf bila perlu), sebagai cadangan kalau kamu lupa scan QR, dan disimpan sebagai catatan kunjungan. Dengan menekan Lanjut, kamu setuju.
         </p>
       </div>
-      <OnScreenKeyboard shift={shift} onKey={onKey} disabled={busy === 'register'} label={field === 'name' ? 'Keyboard nama' : 'Keyboard email'} />
+      <OnScreenKeyboard shift={shift} onKey={onKey} disabled={busy === 'register'} label={field === 'name' ? 'Keyboard nama' : field === 'email' ? 'Keyboard email' : 'Keyboard nomor WhatsApp'} />
     </div>
   );
 }

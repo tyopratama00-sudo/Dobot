@@ -516,12 +516,15 @@ class Api {
   /**
    * Save or update the Registrasi on the paid Go session (PUT /api/session/{goId}/registration).
    * The backend validates and normalises both fields; its 400/410 message is the user message.
-   * Also used to change the email later in the session (QR screen).
+   * Also used to change the email later in the session (QR screen): without `whatsapp`
+   * the backend keeps the stored number; '' clears it.
    */
-  async saveRegistration(name: string, email: string): Promise<RegistrationDTO> {
+  async saveRegistration(name: string, email: string, whatsapp?: string): Promise<RegistrationDTO> {
     if (!this.goId) throw new ApiError(404, 'NOT_FOUND', 'Sesi glambot tidak ditemukan', 'Sesi tidak ditemukan.');
-    const r = await go<{ name: string; email: string }>('PUT', `/api/session/${this.goId}/registration`, { name, email });
-    const registration = { name: r?.name ?? name, email: r?.email ?? email };
+    const body = whatsapp === undefined ? { name, email } : { name, email, whatsapp };
+    const r = await go<{ name: string; email: string; whatsapp?: string }>('PUT', `/api/session/${this.goId}/registration`, body);
+    const registration: RegistrationDTO = { name: r?.name ?? name, email: r?.email ?? email };
+    if (typeof r?.whatsapp === 'string') registration.whatsapp = r.whatsapp;
     if (this.snap && this.st !== 'REGISTRATION') this.emit({ registration });
     return registration;
   }
@@ -590,7 +593,7 @@ class Api {
         return this.emit({ status: this.registrationOn ? 'REGISTRATION' : 'FRAME_SELECTION' });
       case 'register': {
         if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
-        const registration = await this.saveRegistration(cmd.name, cmd.email);
+        const registration = await this.saveRegistration(cmd.name, cmd.email, cmd.whatsapp);
         // Timed out while the request was in flight: saveRegistration already recorded it.
         if (this.st !== 'REGISTRATION') return this.snap!;
         return this.emit({ status: 'FRAME_SELECTION', registration });

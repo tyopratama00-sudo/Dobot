@@ -91,7 +91,7 @@ func AdminResendEmailFoto(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /api/admin/sessions/{id}/registration — Hapus data registrasi:
-// nama dan email dikosongkan, Email Foto yang belum terkirim dihentikan.
+// nama, email dan nomor WhatsApp dikosongkan, Email Foto yang belum terkirim dihentikan.
 // Baris sesi, foto, dan transaksi tetap ada.
 func AdminDeleteRegistration(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -109,7 +109,7 @@ func AdminDeleteRegistration(w http.ResponseWriter, r *http.Request) {
 		respondInternal(w, "forget email foto", err)
 		return
 	}
-	if _, err := database.DB.Exec(`UPDATE sessions SET registration_name = '', registration_email = '' WHERE id = ?`, id); err != nil {
+	if _, err := database.DB.Exec(`UPDATE sessions SET registration_name = '', registration_email = '', registration_whatsapp = '' WHERE id = ?`, id); err != nil {
 		respondInternal(w, "delete registration", err)
 		return
 	}

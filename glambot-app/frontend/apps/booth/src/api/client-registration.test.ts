@@ -89,6 +89,22 @@ test('submit saves the registration on the paid backend session and moves to fra
   expect(backend.registrations).toEqual([{ url: '/api/session/go-1/registration', body: { name: 'Rina', email: 'rina@gmail.com' } }]);
 });
 
+test('submit sends the WhatsApp number to the backend and keeps the stored form', async () => {
+  const backend = booth({});
+  const api = await paidSession(false);
+  await api.command({ type: 'begin' });
+  vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {
+    const body = JSON.parse(String(init!.body));
+    backend.registrations.push({ url: '/api/session/go-1/registration', body });
+    return json({ session_id: 'go-1', ...body, whatsapp: '6281234567890', registered_at: new Date().toISOString() });
+  });
+
+  const s = await api.command({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '0812-3456-7890' });
+
+  expect(backend.registrations[0].body).toEqual({ name: 'Rina', email: 'rina@gmail.com', whatsapp: '0812-3456-7890' });
+  expect(s.registration).toEqual({ name: 'Rina', email: 'rina@gmail.com', whatsapp: '6281234567890' });
+});
+
 test('a rejected registration keeps the customer on the registration screen', async () => {
   booth({});
   const api = await paidSession(false);
