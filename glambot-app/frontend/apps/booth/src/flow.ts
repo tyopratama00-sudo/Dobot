@@ -23,6 +23,7 @@ import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
 import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
+import { photoPose } from './capture-pose';
 import { canSwitchMode, freeModeOutdated, modeChanged, qtyAfterModeSwitch } from './payment-mode';
 import { MAX_STICKERS, type Sticker } from './stickers';
 import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
@@ -624,6 +625,8 @@ async function runCapture(t: number, retakeAngle: number | null) {
   let firedKey: number | null = null;
   /** When "Jepret!" showed; non-null until the photo arrives (or gives up). */
   let snapAt: number | null = null;
+  /** Robot pose index whose countdown fired the last shutter; the photo is filed under it. */
+  let shotIndex: number | null = null;
   /** Last "nice" line shown, so the next shot never repeats it. */
   let nice = -1;
   const ticker = setInterval(() => {
@@ -632,6 +635,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
     if (left <= 0) {
       // Go fires the shutter now: "Jepret!", flash, freeze the live frame.
       firedKey = armedKey;
+      shotIndex = armedKey;
       shutterAt = null;
       lastCd = null;
       snapAt = Date.now();
@@ -657,9 +661,8 @@ async function runCapture(t: number, retakeAngle: number | null) {
       const seq = det?.sequence;
       if (seq?.total) api.setPlanAngles(seq.total);
       const total = plan(get()).angles;
-      // Robot still holds the pose until shortly after the shot, so its index tags the new photo.
-      const robotAngle = seq?.index ? Math.max(0, Math.min(total - 1, seq.index - 1)) : undefined;
-      const snap = await api.refreshPhotos(robotAngle);
+      const robotAngle = photoPose(null, seq?.index, total);
+      const snap = await api.refreshPhotos(photoPose(shotIndex, seq?.index, total));
       if (t !== tok) throw new Aborted();
       if (snap) applySnapshot(snap);
       const n = get().session?.photos.length ?? 0;
@@ -669,6 +672,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
 
       if (n > count) {
         count = n;
+        shotIndex = null;
         if (snapAt === null) flash();
         firedKey = armedKey;
         shutterAt = null;
