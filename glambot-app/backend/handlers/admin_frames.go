@@ -117,6 +117,16 @@ func scanFrame(s interface{ Scan(...any) error }) (frameResponse, error) {
 	return f, nil
 }
 
+// frameNameOrder sorts frames by name with the number in it read as a number,
+// so "Personal 2" comes before "Personal 10". Frame ids are random, so they
+// only break exact ties. prefix is the table alias ("f.") or empty.
+func frameNameOrder(prefix, dir string) string {
+	name := prefix + "name"
+	return "regexp_replace(" + name + ", '[0-9]+', '', 'g') " + dir +
+		", COALESCE(substring(" + name + " from '[0-9]+')::numeric, 0) " + dir +
+		", " + name + " " + dir + ", " + prefix + "id " + dir
+}
+
 // GET /api/admin/frames
 func AdminListFrames(w http.ResponseWriter, r *http.Request) {
 	page, limit, offset := parsePaging(r)
@@ -138,10 +148,10 @@ func AdminListFrames(w http.ResponseWriter, r *http.Request) {
 	}
 	whereSQL := strings.Join(where, " AND ")
 
-	orderBy := "f.sort_order ASC, f.id ASC"
+	orderBy := "f.sort_order ASC, " + frameNameOrder("f.", "ASC")
 	switch r.URL.Query().Get("sortBy") {
 	case "name":
-		orderBy = "f.name " + sortDir(r)
+		orderBy = frameNameOrder("f.", sortDir(r))
 	case "category":
 		orderBy = "f.category " + sortDir(r)
 	case "usedCount":

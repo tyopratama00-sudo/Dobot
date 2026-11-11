@@ -29,3 +29,29 @@ func TestAudioSeedsCoverBoothFiles(t *testing.T) {
 		}
 	}
 }
+
+// Layar registrasi punya clip sendiri (tampil, kemungkinan salah ketik) di tab
+// "register" halaman Audio admin.
+func TestAudioSeedsHaveRegistrationClips(t *testing.T) {
+	tabs := map[string]bool{}
+	for _, x := range AudioTabs {
+		tabs[x] = true
+	}
+	if !tabs["register"] {
+		t.Fatal(`AudioTabs has no "register" tab`)
+	}
+	want := map[string]bool{"reg_show": false, "reg_typo": false}
+	for _, s := range audioSeeds() {
+		if _, ok := want[s.id]; ok {
+			if s.tab != "register" || s.when == "" {
+				t.Errorf("%s: tab %q when %q", s.id, s.tab, s.when)
+			}
+			want[s.id] = true
+		}
+	}
+	for id, seen := range want {
+		if !seen {
+			t.Errorf("%s has no audio seed", id)
+		}
+	}
+}

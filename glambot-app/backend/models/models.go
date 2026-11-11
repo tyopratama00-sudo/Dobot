@@ -51,6 +51,20 @@ type Session struct {
 	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
 }
 
+// ─── Email Foto ──────────────────────────────────────────────────────────────
+
+// Status catatan pengiriman Email Foto (email_deliveries.status). Di sini,
+// bukan di handlers, supaya services (cleanup) bisa memakainya tanpa import cycle.
+const (
+	EmailFotoPending = "pending"
+	EmailFotoSent    = "sent"
+	EmailFotoFailed  = "failed"
+	EmailFotoSkipped = "skipped"
+
+	// EmailFotoReasonPhotosGone alasan gagal saat foto sesi dihapus (kedaluwarsa).
+	EmailFotoReasonPhotosGone = "sesi kedaluwarsa, foto sudah dihapus"
+)
+
 // ─── Transaction ─────────────────────────────────────────────────────────────
 
 type TransactionStatus string

@@ -372,7 +372,25 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=
 GOOGLE_DRIVE_FOLDER_ID=
+
+# Email booth lewat Gmail (opsional) — dipakai Email Foto & tombol "Kirim email
+# uji" di Pengaturan admin. Email dianggap aktif hanya kalau SMTP_USER DAN
+# SMTP_APP_PASSWORD terisi; restart backend setelah mengubahnya.
+# SMTP_APP_PASSWORD adalah App Password Google (16 huruf), bukan password Gmail.
+# App Password hanya bisa dibuat kalau akun Gmail booth sudah mengaktifkan
+# 2-Step Verification (https://myaccount.google.com/apppasswords).
+SMTP_USER=booth.anda@gmail.com
+SMTP_APP_PASSWORD=
+# Opsional: default smtp.gmail.com port 587 (STARTTLS); port 465 = TLS langsung.
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+# Opsional: nama pengirim Email Foto. Kosong = brand label di Pengaturan admin,
+# atau "Glambot Photo Booth". Subjek, isi email, dan pesan WhatsApp selalu
+# memakai brand label (atau "Glambot Photo Booth").
+SMTP_FROM_NAME=Glambot Photo Booth
 ```
+
+Cek setelan email di dashboard admin → **Pengaturan → Email**: statusnya "Email aktif" beserta alamat pengirim, atau "belum diatur". Ketik alamat tujuan lalu tekan **Kirim email uji**; kalau gagal, pesan error dari Gmail ditampilkan.
 
 ### Booth (`frontend/.env`)
 

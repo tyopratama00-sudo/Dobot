@@ -10,10 +10,14 @@ export function freeModeOutdated(config: Parameters<typeof isFreeMode>[0], statu
   return isFreeMode(config) && status === 'WAITING_PAYMENT';
 }
 
-type Mode = { freeMode?: boolean; freeDigitalOnly?: boolean };
+type Mode = { freeMode?: boolean; freeDigitalOnly?: boolean; registrationScreen?: boolean };
 
 export function modeChanged(current: Mode | null | undefined, next: Mode) {
-  return (current?.freeMode === true) !== (next.freeMode === true) || (current?.freeDigitalOnly === true) !== (next.freeDigitalOnly === true);
+  return (
+    (current?.freeMode === true) !== (next.freeMode === true) ||
+    (current?.freeDigitalOnly === true) !== (next.freeDigitalOnly === true) ||
+    (current?.registrationScreen === true) !== (next.registrationScreen === true)
+  );
 }
 
 /**

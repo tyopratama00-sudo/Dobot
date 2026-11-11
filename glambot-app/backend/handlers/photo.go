@@ -192,7 +192,7 @@ func GetFrames(w http.ResponseWriter, r *http.Request) {
 		SELECT id, name, COALESCE(category, ''), file_path, thumb_url, photo_slots, canvas_width, canvas_height, slots
 		FROM frames
 		WHERE is_active = 1
-		ORDER BY sort_order ASC, id ASC`)
+		ORDER BY sort_order ASC, `+frameNameOrder("", "ASC"))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to load frames")
 		return

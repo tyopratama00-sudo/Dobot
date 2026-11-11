@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"photobooth/database"
+	"photobooth/models"
 	"photobooth/services"
 
 	"github.com/go-chi/chi/v5"
@@ -27,12 +29,22 @@ type adminSession struct {
 	DriveURL    string  `json:"drive_url"`
 	CreatedAt   string  `json:"created_at"`
 	CompletedAt *string `json:"completed_at,omitempty"`
+	// Registrasi melekat pada sesi (ADR 0001); kosong bila belum registrasi.
+	RegistrationName  string `json:"registration_name"`
+	RegistrationEmail string `json:"registration_email"`
+	// Nomor WhatsApp ternormalisasi (mis. 6281234567890), kosong bila tidak diisi.
+	RegistrationWhatsApp string  `json:"registration_whatsapp"`
+	RegisteredAt         *string `json:"registered_at"`
+	// Terisi bila admin menghapus data registrasi (nama, email, WhatsApp sudah kosong).
+	RegistrationDeletedAt *string `json:"registration_deleted_at"`
+	expiresAt             time.Time
 }
 
 const sessionSelect = `s.id, COALESCE(p.name, s.package_code), s.price, s.discount, s.final_price,
 	s.print_count, s.status, COALESCE(f.name, ''),
 	(SELECT COUNT(*) FROM photos ph WHERE ph.session_id = s.id AND ph.type = 'raw'),
-	COALESCE(s.drive_url, ''), s.created_at, s.completed_at
+	COALESCE(s.drive_url, ''), s.created_at, s.completed_at,
+	s.registration_name, s.registration_email, s.registration_whatsapp, s.registered_at, s.registration_deleted_at, s.expires_at
 	FROM sessions s
 	LEFT JOIN packages p ON p.id = s.package_id
 	LEFT JOIN frames f ON f.id = s.frame_id`
@@ -42,24 +54,65 @@ func scanSession(row interface{ Scan(...any) error }) (adminSession, error) {
 		s         adminSession
 		created   time.Time
 		completed sql.NullTime
+		reg       sql.NullTime
+		regDel    sql.NullTime
 	)
 	err := row.Scan(&s.ID, &s.Package, &s.Price, &s.Discount, &s.FinalPrice, &s.PrintCount,
-		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed)
+		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed,
+		&s.RegistrationName, &s.RegistrationEmail, &s.RegistrationWhatsApp, &reg, &regDel, &s.expiresAt)
 	s.CreatedAt = created.Format(time.RFC3339)
 	if completed.Valid {
 		c := completed.Time.Format(time.RFC3339)
 		s.CompletedAt = &c
 	}
+	if reg.Valid {
+		at := reg.Time.Format(time.RFC3339)
+		s.RegisteredAt = &at
+	}
+	if regDel.Valid {
+		at := regDel.Time.Format(time.RFC3339)
+		s.RegistrationDeletedAt = &at
+	}
 	return s, err
 }
+
+// whatsappSearchDigits mengubah kata pencarian yang mirip nomor telepon
+// (mis. "0812-3456", "+62 812") ke bentuk tersimpan: digit saja, + dibuang,
+// 0 di depan menjadi 62. ok=false bila kata itu bukan nomor (min. 4 digit).
+func whatsappSearchDigits(q string) (string, bool) {
+	n := strings.TrimPrefix(whatsappStrip.Replace(q), "+")
+	if len(n) < 4 {
+		return "", false
+	}
+	for _, c := range n {
+		if c < '0' || c > '9' {
+			return "", false
+		}
+	}
+	if n[0] == '0' {
+		n = "62" + n[1:]
+	}
+	return n, true
+}
+
+// likeEscaper membuat %, _ dan \ pada kata pencarian dicocokkan apa adanya oleh ILIKE.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // GET /api/admin/sessions?search&status&from&to&page&limit
 func AdminListSessions(w http.ResponseWriter, r *http.Request) {
 	page, limit, offset := parsePaging(r)
 	where, args := []string{"1=1"}, []any{}
 	if q := queryParam(r, "search"); q != "" {
-		where = append(where, "s.id ILIKE ?")
-		args = append(args, "%"+q+"%")
+		// Cocok sebagian (tanpa beda huruf besar/kecil) pada id sesi, nama, atau email registrasi.
+		cond := "s.id ILIKE ? OR s.registration_name ILIKE ? OR s.registration_email ILIKE ?"
+		like := "%" + likeEscaper.Replace(q) + "%"
+		args = append(args, like, like, like)
+		// Kata yang berupa nomor telepon juga dicari pada nomor WhatsApp.
+		if digits, ok := whatsappSearchDigits(q); ok {
+			cond += " OR s.registration_whatsapp LIKE ?"
+			args = append(args, "%"+digits+"%")
+		}
+		where = append(where, "("+cond+")")
 	}
 	if st := queryParam(r, "status"); st != "" {
 		where = append(where, "s.status = ?")
@@ -92,7 +145,54 @@ func AdminListSessions(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, adminListResponse{Data: list, Meta: buildMeta(total, page, limit)})
 }
 
-// GET /api/admin/sessions/{id} → sesi + foto + transaksi
+// sessionRegistration adalah bagian "Registrasi & Email Foto" pada detail sesi.
+type sessionRegistration struct {
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	WhatsApp     string `json:"whatsapp"`
+	RegisteredAt string `json:"registered_at"`
+	// Waktu "Hapus data registrasi"; null bila datanya masih ada.
+	DeletedAt *string `json:"deleted_at"`
+	// WhatsAppLink = link wa.me dengan pesan siap kirim untuk tombol
+	// "Kirim via WhatsApp"; null bila tidak bisa, dengan alasannya di
+	// WhatsAppLinkReason.
+	WhatsAppLink       *string `json:"whatsapp_link"`
+	WhatsAppLinkReason string  `json:"whatsapp_link_reason"`
+}
+
+// registrationOf mengembalikan nil bila sesi belum registrasi.
+func registrationOf(s adminSession, now time.Time) *sessionRegistration {
+	if s.RegisteredAt == nil {
+		return nil
+	}
+	reg := &sessionRegistration{Name: s.RegistrationName, Email: s.RegistrationEmail,
+		WhatsApp: s.RegistrationWhatsApp, RegisteredAt: *s.RegisteredAt, DeletedAt: s.RegistrationDeletedAt}
+	switch {
+	case s.RegistrationWhatsApp == "":
+		reg.WhatsAppLinkReason = "Belum ada nomor WhatsApp"
+	case s.Status == string(models.StatusExpired) || !s.expiresAt.After(now):
+		reg.WhatsAppLinkReason = "Sesi sudah kedaluwarsa, foto sudah dihapus"
+	case s.DriveURL == "":
+		reg.WhatsAppLinkReason = "Link foto belum tersedia (Google Drive)"
+	default:
+		link := whatsappLink(s.RegistrationWhatsApp, s.RegistrationName, emailFotoBoothName(), s.DriveURL, s.expiresAt)
+		reg.WhatsAppLink = &link
+	}
+	return reg
+}
+
+// whatsappLink menyusun link wa.me berisi pesan siap kirim. Spasi ditulis
+// %20 (bukan +) supaya WhatsApp menampilkannya apa adanya.
+func whatsappLink(number, name, booth, folder string, expires time.Time) string {
+	if name == "" {
+		name = "kamu"
+	}
+	msg := fmt.Sprintf("Halo %s, ini foto kamu dari %s 📸 %s Link berlaku sampai %s.",
+		name, booth, folder, indonesianTime(expires))
+	return "https://wa.me/" + number + "?text=" + strings.ReplaceAll(url.QueryEscape(msg), "+", "%20")
+}
+
+// GET /api/admin/sessions/{id} → sesi + foto + transaksi + registrasi (null bila belum ada)
 func AdminGetSession(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	s, err := scanSession(database.DB.QueryRow(`SELECT `+sessionSelect+` WHERE s.id = ?`, id))
@@ -149,7 +249,16 @@ func AdminGetSession(w http.ResponseWriter, r *http.Request) {
 		txs = append(txs, t)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{"session": s, "photos": photos, "transactions": txs})
+	emailFoto, err := emailFotoOf(id)
+	if err != nil {
+		respondInternal(w, "session email foto", err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"session": s, "photos": photos, "transactions": txs,
+		"registration": registrationOf(s, time.Now()), "email_foto": emailFoto,
+	})
 }
 
 // POST /api/admin/sessions/{id}/reprint {copies} — cetak ulang strip framed terbaru.

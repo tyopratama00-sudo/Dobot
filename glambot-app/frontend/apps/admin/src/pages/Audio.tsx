@@ -21,6 +21,7 @@ export const AUDIO_TABS: Record<string, string> = {
   welcome: 'Welcome',
   pay: 'Bayar',
   pay_free: 'Bayar gratis',
+  register: 'Registrasi',
   package: 'Pilih paket',
   frame: 'Frame',
   capture: 'Bersiap & foto',

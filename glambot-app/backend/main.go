@@ -60,6 +60,7 @@ func main() {
 	// ─── 5. Jalankan job background (cleanup + penyusul upload Drive) ─────────
 	services.StartCleanupJob()
 	handlers.StartDriveRetryJob()
+	handlers.StartEmailFotoJob()
 
 	// ─── 6. Setup router ──────────────────────────────────────────────────────
 	handler := routes.Setup(config.App.StoragePath)

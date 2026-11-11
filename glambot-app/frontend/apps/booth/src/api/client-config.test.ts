@@ -46,3 +46,8 @@ test('losing /api/config still falls back to paid defaults instead of failing', 
   }));
   expect((await api.config()).freeMode).toBe(false);
 });
+
+test('the cheap mode check also reports whether registration is on', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ freeMode: false, freeDigitalOnly: false, registrationEnabled: true })));
+  expect(await api.mode()).toMatchObject({ freeMode: false, registrationScreen: true });
+});

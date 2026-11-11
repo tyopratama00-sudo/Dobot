@@ -56,6 +56,8 @@ func Setup(storagePath string) http.Handler {
 			r.Get("/{sessionID}", handlers.GetSession)
 			r.Get("/create/{sessionID}", handlers.GetSession)
 			r.Patch("/{sessionID}/status", handlers.UpdateSessionStatus)
+			r.Put("/{sessionID}/registration", handlers.SaveSessionRegistration)
+			r.Post("/{sessionID}/heartbeat", handlers.SessionHeartbeat)
 			r.Patch("/create/{sessionID}/status", handlers.UpdateSessionStatus)
 		})
 
@@ -145,6 +147,10 @@ func Setup(storagePath string) http.Handler {
 				r.Patch("/settings", handlers.AdminUpdateSettings)
 				r.Delete("/settings", handlers.AdminResetSettings)
 
+				// Email booth (Gmail SMTP dari .env): status + kirim email uji.
+				r.Get("/email", handlers.AdminEmailStatus)
+				r.Post("/email/test", handlers.AdminSendTestEmail)
+
 				// Settings — tuning robot (speed/akselerasi + sequence/face-tracking
 				// timing) yang diteruskan ke service dobot.
 				r.Get("/robot-settings", handlers.GetRobotSettings)
@@ -195,6 +201,8 @@ func Setup(storagePath string) http.Handler {
 				r.Get("/sessions", handlers.AdminListSessions)
 				r.Get("/sessions/{id}", handlers.AdminGetSession)
 				r.Post("/sessions/{id}/reprint", handlers.AdminReprintSession)
+				r.Post("/sessions/{id}/email-foto/resend", handlers.AdminResendEmailFoto)
+				r.Delete("/sessions/{id}/registration", handlers.AdminDeleteRegistration)
 				r.Post("/password", handlers.AdminChangePassword)
 			})
 		})

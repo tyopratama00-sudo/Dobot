@@ -1928,3 +1928,235 @@ img {
 #dm button.on {
   background: var(--ye);
 }
+
+/* Registrasi pelanggan: name + email on the on-screen keyboard */
+.reg-screen {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
+  padding: 56px 80px 32px;
+}
+.reg-head {
+  text-align: center;
+}
+.reg-head h1 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 64px;
+  text-transform: none;
+}
+.reg-fields {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr 1fr auto;
+  gap: 20px;
+  width: min(100%, 1640px);
+  align-items: stretch;
+}
+.reg-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 24px;
+  border: 3px solid rgba(43, 42, 76, 0.12);
+  border-radius: 22px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.reg-field.on {
+  border-color: var(--bl);
+  box-shadow: 0 0 0 6px rgba(91, 124, 250, 0.14);
+}
+.reg-field small {
+  color: var(--mu);
+  font: 600 22px 'Fredoka', sans-serif;
+}
+.reg-field span {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 38px 'Fredoka', sans-serif;
+}
+.reg-field span.ph {
+  color: rgba(43, 42, 76, 0.3);
+}
+.reg-caret {
+  display: inline-block;
+  width: 3px;
+  height: 40px;
+  margin-left: 2px;
+  vertical-align: -6px;
+  background: var(--bl);
+  animation: reg-blink 1s steps(1) infinite;
+}
+@keyframes reg-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.reg-next {
+  min-width: 240px;
+  font-size: 34px;
+}
+.reg-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: min(100%, 1640px);
+  text-align: center;
+}
+.reg-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  max-width: 100%;
+}
+.reg-check p {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.reg-confirm {
+  color: var(--ink);
+  font: 600 30px 'Fredoka', sans-serif;
+}
+.reg-confirm b {
+  color: var(--bl);
+  font-size: 40px;
+}
+.reg-bad {
+  color: #d1495b;
+  font: 600 28px 'Fredoka', sans-serif;
+}
+.reg-suggest {
+  padding: 10px 28px;
+  border: 3px solid var(--ye);
+  border-radius: 999px;
+  background: #fff8d6;
+  color: var(--ink);
+  font: 600 32px 'Fredoka', sans-serif;
+  cursor: pointer;
+}
+.reg-suggest span {
+  margin-left: 10px;
+  color: var(--mu);
+  font-size: 24px;
+}
+.reg-why {
+  max-width: 1400px;
+  margin: 0;
+  color: var(--mu);
+  font: 500 22px/1.35 'Fredoka', sans-serif;
+}
+.osk {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 1640px);
+}
+.osk-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.osk-key {
+  flex: 1 1 0;
+  max-width: 128px;
+  min-height: 92px;
+  padding: 0;
+  border: 2px solid rgba(43, 42, 76, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  font: 600 38px 'Fredoka', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(43, 42, 76, 0.1);
+}
+.osk-key:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(43, 42, 76, 0.1);
+}
+.osk-key:disabled {
+  opacity: 0.5;
+}
+.osk-shift,
+.osk-backspace {
+  flex-grow: 1.6;
+  max-width: 200px;
+  font-size: 28px;
+}
+.osk-shift.on {
+  background: var(--bl);
+  color: #fff;
+}
+.osk-space {
+  flex-grow: 3;
+  max-width: 420px;
+  font-size: 28px;
+}
+.osk-shortcut {
+  flex-grow: 2;
+  max-width: 320px;
+  background: var(--soft);
+  font-size: 32px;
+}
+
+/* QR screen: Email Foto line and the Ubah email dialog */
+.qr-email {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  color: var(--ink);
+  font: 600 30px 'Fredoka', sans-serif;
+}
+.qr-email span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.qr-email b {
+  color: var(--bl);
+}
+.qr-email .btn {
+  flex: none;
+}
+.qr-email-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(43, 42, 76, 0.45);
+  backdrop-filter: blur(6px);
+}
+.qr-email-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: min(100% - 80px, 1720px);
+  padding: 40px;
+  border-radius: 36px;
+  background: #faf8f3;
+  box-shadow: var(--sh);
+}
+.qr-email-panel h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 56px;
+  text-transform: none;
+}
+.qr-email-fields {
+  grid-template-columns: 1fr auto auto;
+}

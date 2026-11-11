@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { dt, get, post, qs, rp, type Page } from '../api';
+import { useState, type ReactNode } from 'react';
+import { del, dt, get, post, qs, rp, type Page } from '../api';
 import { Pager, statusChip, useAction, usePoll } from '../ui';
 
 interface Sess {
@@ -15,12 +15,55 @@ interface Sess {
   drive_url: string;
   created_at: string;
   completed_at?: string;
+  registration_name: string;
+  registration_email: string;
+  /** Nomor WhatsApp ternormalisasi (mis. 6281234567890); '' bila tidak diisi. */
+  registration_whatsapp: string;
+  registered_at: string | null;
+}
+/** Registrasi melekat pada sesi (ADR 0001); null bila belum registrasi. */
+interface Registration {
+  name: string;
+  email: string;
+  /** Nomor WhatsApp ternormalisasi; '' bila tidak diisi. */
+  whatsapp: string;
+  registered_at: string;
+  /** Waktu "Hapus data registrasi"; null bila datanya masih ada. */
+  deleted_at: string | null;
+  /** Link wa.me berisi pesan siap kirim; null bila belum bisa, alasannya di whatsapp_link_reason. */
+  whatsapp_link: string | null;
+  whatsapp_link_reason: string;
 }
 interface Detail {
   session: Sess;
   photos: { id: string; type: 'raw' | 'framed'; url: string; selected: boolean }[];
   transactions: { id: string; midtrans_order_id: string; amount: number; status: string; created_at: string }[];
+  registration: Registration | null;
+  email_foto: EmailFoto | null;
 }
+/** Catatan pengiriman Email Foto sesi; null bila sesi tidak pernah registrasi. */
+interface EmailFoto {
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
+  recipient: string;
+  content: '' | 'link_strip' | 'strip' | 'link';
+  attempts: number;
+  reason: string;
+  sent_at: string | null;
+  next_attempt_at: string | null;
+}
+
+const EMAIL_FOTO_STATUS: Record<EmailFoto['status'], [label: string, chip: string]> = {
+  pending: ['Menunggu', 'warn'],
+  sent: ['Terkirim', 'ok'],
+  failed: ['Gagal', 'err'],
+  skipped: ['Tidak dikirim', 'mu'],
+};
+const EMAIL_FOTO_CONTENT: Record<EmailFoto['content'], string> = {
+  '': '—',
+  link_strip: 'Link folder + strip',
+  strip: 'Strip saja',
+  link: 'Link folder saja',
+};
 
 const STATUS: [string, string][] = [
   ['', 'Semua status'],
@@ -47,7 +90,7 @@ function SessionList() {
       <div className="card">
         <div className="form">
           <label className="f">
-            Cari ID sesi
+            Cari ID sesi, nama, email, atau no. WhatsApp
             <input value={f.search} onChange={(e) => set({ search: e.target.value })} />
           </label>
           <label className="f">
@@ -77,6 +120,8 @@ function SessionList() {
             <thead>
               <tr>
                 <th>Waktu</th>
+                <th>Nama</th>
+                <th>Email</th>
                 <th>Paket</th>
                 <th>Frame</th>
                 <th>Foto</th>
@@ -89,6 +134,8 @@ function SessionList() {
               {(list?.data ?? []).map((s) => (
                 <tr key={s.id} className="click" onClick={() => (location.hash = `#/sesi/${s.id}`)}>
                   <td className="small">{dt(s.created_at)}</td>
+                  <td>{s.registration_name || '—'}</td>
+                  <td className="small">{s.registration_email || '—'}</td>
                   <td>{s.package}</td>
                   <td>{s.frame || '—'}</td>
                   <td>{s.photos}</td>
@@ -107,8 +154,111 @@ function SessionList() {
   );
 }
 
+/** Bagian "Registrasi & Email Foto" pada detail sesi: data registrasi, status Email Foto, Kirim ulang, dan Hapus data registrasi. */
+function RegistrationSection({
+  id,
+  registration,
+  emailFoto,
+  reload,
+}: {
+  id: string;
+  registration: Registration | null;
+  emailFoto: EmailFoto | null;
+  reload: () => Promise<void>;
+}) {
+  const [email, setEmail] = useState(registration?.email ?? '');
+  const { busy, run } = useAction();
+  const path = `/api/admin/sessions/${encodeURIComponent(id)}`;
+  // "Hapus data registrasi" mengosongkan nama, email, dan WhatsApp; waktu registrasi tetap sebagai riwayat.
+  const deleted = !!registration?.deleted_at;
+
+  const resend = async () => {
+    const to = email.trim() || registration?.email || '';
+    if (!confirm(`Kirim ulang Email Foto ke ${to}?`)) return;
+    if (await run('resend', () => post(`${path}/email-foto/resend`, { email: email.trim() }), 'Email Foto diantre ulang')) await reload();
+  };
+  const forget = async () => {
+    if (!confirm('Hapus nama, email, dan nomor WhatsApp pelanggan dari sesi ini? Email Foto yang belum terkirim dibatalkan. Tindakan ini tidak bisa dibatalkan.')) return;
+    if (await run('delete', () => del(`${path}/registration`), 'Data registrasi dihapus')) {
+      setEmail('');
+      await reload();
+    }
+  };
+
+  if (!registration) {
+    return (
+      <div className="card">
+        <h2>Registrasi &amp; Email Foto</h2>
+        <p className="mu">Belum registrasi.</p>
+      </div>
+    );
+  }
+  const [label, chip] = emailFoto ? EMAIL_FOTO_STATUS[emailFoto.status] : ['—', ''];
+  const rows: [string, ReactNode][] = [
+    ['Nama', deleted ? <span className="mu">Data registrasi dihapus</span> : registration.name],
+    ['Email', deleted ? '—' : registration.email],
+    ['WhatsApp', registration.whatsapp ? <span className="mono">+{registration.whatsapp}</span> : '—'],
+    ['Waktu registrasi', dt(registration.registered_at)],
+  ];
+  if (registration.deleted_at) rows.push(['Data dihapus', dt(registration.deleted_at)]);
+  if (emailFoto) {
+    rows.push(['Status Email Foto', <span className={`chip ${chip}`}>{label}</span>]);
+    if (emailFoto.reason) rows.push([emailFoto.status === 'pending' ? 'Error terakhir' : 'Alasan', emailFoto.reason]);
+    rows.push(['Percobaan', emailFoto.attempts]);
+    if (emailFoto.status === 'pending' && emailFoto.next_attempt_at) rows.push(['Coba lagi', dt(emailFoto.next_attempt_at)]);
+    if (emailFoto.status === 'sent') {
+      rows.push(['Terkirim', dt(emailFoto.sent_at)]);
+      rows.push(['Isi', EMAIL_FOTO_CONTENT[emailFoto.content]]);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Registrasi &amp; Email Foto</h2>
+      <table>
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <th style={{ width: 130 }}>{k}</th>
+              <td>{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {deleted ? null : (
+        <div className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+          <label className="f" style={{ minWidth: 240 }}>
+            Kirim ke email
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={registration.email} />
+          </label>
+          <button className="btn pr" disabled={busy !== null} onClick={() => void resend()}>
+            {busy === 'resend' ? 'Mengantre…' : 'Kirim ulang'}
+          </button>
+          {/* Semi-manual: membuka WhatsApp dengan pesan siap kirim; staf yang menekan kirim. */}
+          {registration.whatsapp_link ? (
+            <a className="btn" href={registration.whatsapp_link} target="_blank" rel="noopener noreferrer">
+              Kirim via WhatsApp
+            </a>
+          ) : (
+            <>
+              <button className="btn" disabled title={registration.whatsapp_link_reason}>
+                Kirim via WhatsApp
+              </button>
+              <span className="mu small">{registration.whatsapp_link_reason}</span>
+            </>
+          )}
+          <span className="spacer" />
+          <button className="btn er" disabled={busy !== null} onClick={() => void forget()}>
+            {busy === 'delete' ? 'Menghapus…' : 'Hapus data registrasi'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionDetail({ id }: { id: string }) {
-  const [d, , err] = usePoll<Detail>(() => get(`/api/admin/sessions/${encodeURIComponent(id)}`), 0, [id]);
+  const [d, reload, err] = usePoll<Detail>(() => get(`/api/admin/sessions/${encodeURIComponent(id)}`), 0, [id]);
   const [copies, setCopies] = useState(1);
   const { busy, run } = useAction();
   if (err) return <div className="chip err">{err}</div>;
@@ -183,6 +333,7 @@ function SessionDetail({ id }: { id: string }) {
           {d.transactions.length ? null : <p className="mu small">Tidak ada transaksi.</p>}
         </div>
       </div>
+      <RegistrationSection key={d.registration?.email ?? ''} id={id} registration={d.registration} emailFoto={d.email_foto} reload={reload} />
       <div className="card">
         <h2>Foto ({raw.length})</h2>
         <div className="photos">

@@ -1,4 +1,5 @@
 import {
+  activePhotos,
   applyEditOp,
   randomPick,
   CAPTURE_STATES,
@@ -22,6 +23,7 @@ import { api, ApiError, NetworkError, newRequestId, onConnectivity } from './api
 import { getCamera, cameraInstance } from './camera/service';
 import { robot } from './robot/floating';
 import { clipSeconds, loadAudioUploads, paymentQrCue, voice } from './voice';
+import { photoPose } from './capture-pose';
 import { canSwitchMode, freeModeOutdated, modeChanged, qtyAfterModeSwitch } from './payment-mode';
 import { MAX_STICKERS, type Sticker } from './stickers';
 import { currentScreen, currentTemplate, flatPhotos, get, plan, scaleMs, set, type BoothState } from './store';
@@ -29,6 +31,9 @@ import { timeoutAction } from './timeout-flow';
 
 /** How often the booth checks whether admin switched between free and paid mode. */
 export const MODE_POLL_MS = 3000;
+
+/** How long the "no photo" apology stays up before the booth returns to welcome. */
+export const NO_PHOTOS_RESET_MS = 8000;
 
 /** How long the paid ticket stays up before the session begins. */
 export const PAID_HOLD_MS = 4000;
@@ -252,6 +257,14 @@ function onEnterState(prevStatus: SessionState | null, next: SessionSnapshot, pa
       break;
     case 'FINAL_PREVIEW':
     case 'REVIEW':
+      // Robot or camera failed: there is nothing to pick, so frame/photo selection would wait forever.
+      if (next.status === 'REVIEW' && activePhotos(next.photos).length === 0) {
+        patch.clientError = { code: 'NO_PHOTOS', message: 'Maaf, foto gagal diambil. Silakan hubungi petugas, ya.' };
+        voice('err_general');
+        const t = tok;
+        setTimeout(() => t === tok && resetToWelcome(), NO_PHOTOS_RESET_MS);
+        break;
+      }
       if (next.templateId) patch.tplId = next.templateId;
       if (next.status === 'FINAL_PREVIEW' && (recovering || prevStatus !== 'EDITING'))
         patch.edits = Object.fromEntries(next.slots.map((x) => [x.slotIndex, x.edit]));
@@ -511,6 +524,51 @@ export function backFromPay() {
   });
 }
 
+/* ------------------------------------------------------------------ registration */
+
+/**
+ * Lanjut on the registration screen. A rejection (e.g. invalid email) keeps the screen and shows why.
+ * The WhatsApp number is always sent ('' = none), so a second Lanjut also clears an old one.
+ */
+export function submitRegistration(name: string, email: string, whatsapp: string) {
+  void guard('register', () => send({ type: 'register', name, email, whatsapp }));
+}
+
+/** Ubah email on the QR screen opened: the pelanggan gets the full QR time again. */
+export function openEmailChange() {
+  set({ timerFrom: Date.now() });
+}
+
+/** Shown when the admin deleted this session's Registrasi (backend answers 403). */
+const REGISTRATION_DELETED = 'Data registrasimu sudah dihapus petugas, jadi email tidak bisa diubah lagi. Fotomu tetap bisa diambil lewat QR ini, ya.';
+
+/**
+ * Save a corrected email from the QR screen. The backend decides the effect: a pending
+ * Email Foto goes to the new address, an already sent one is sent again. Resolves false
+ * when the save was rejected (the notice says why) and the dialog should stay open.
+ */
+export async function saveEmailChange(email: string): Promise<boolean> {
+  const name = get().session?.registration?.name;
+  if (!name) return false;
+  let saved = false;
+  await guard('email', async () => {
+    try {
+      const registration = await api.saveRegistration(name, email);
+      const session = get().session;
+      if (session) set({ session: { ...session, registration } });
+      saved = true;
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 403)) throw e;
+      // 403: the admin deleted this Registrasi. The email line goes; the notice says why in plain words.
+      const session = get().session;
+      if (session) set({ session: { ...session, registration: null } });
+      throw new ApiError(e.status, e.code, e.message, REGISTRATION_DELETED, false);
+    }
+  });
+  set({ timerFrom: Date.now() });
+  return saved;
+}
+
 /* ------------------------------------------------------------------ capture (prototype ready() + run()) */
 
 function setCapture(p: Partial<BoothState['capture']>) {
@@ -581,6 +639,8 @@ async function runCapture(t: number, retakeAngle: number | null) {
   let firedKey: number | null = null;
   /** When "Jepret!" showed; non-null until the photo arrives (or gives up). */
   let snapAt: number | null = null;
+  /** Robot pose index whose countdown fired the last shutter; the photo is filed under it. */
+  let shotIndex: number | null = null;
   /** Last "nice" line shown, so the next shot never repeats it. */
   let nice = -1;
   const ticker = setInterval(() => {
@@ -589,6 +649,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
     if (left <= 0) {
       // Go fires the shutter now: "Jepret!", flash, freeze the live frame.
       firedKey = armedKey;
+      shotIndex = armedKey;
       shutterAt = null;
       lastCd = null;
       snapAt = Date.now();
@@ -614,9 +675,8 @@ async function runCapture(t: number, retakeAngle: number | null) {
       const seq = det?.sequence;
       if (seq?.total) api.setPlanAngles(seq.total);
       const total = plan(get()).angles;
-      // Robot still holds the pose until shortly after the shot, so its index tags the new photo.
-      const robotAngle = seq?.index ? Math.max(0, Math.min(total - 1, seq.index - 1)) : undefined;
-      const snap = await api.refreshPhotos(robotAngle);
+      const robotAngle = photoPose(null, seq?.index, total);
+      const snap = await api.refreshPhotos(photoPose(shotIndex, seq?.index, total));
       if (t !== tok) throw new Aborted();
       if (snap) applySnapshot(snap);
       const n = get().session?.photos.length ?? 0;
@@ -626,6 +686,7 @@ async function runCapture(t: number, retakeAngle: number | null) {
 
       if (n > count) {
         count = n;
+        shotIndex = null;
         if (snapAt === null) flash();
         firedKey = armedKey;
         shutterAt = null;
@@ -894,6 +955,7 @@ export function onIdleTimeout() {
   if (!st) return;
   if (st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();
   switch (timeoutAction(st)) {
+    case 'skip-registration': return void guard('auto', () => sendResilient({ type: 'registration_timeout' }));
     case 'choose-frame': return toFrames();
     case 'confirm-frame': return confirmTemplate();
     case 'auto-pick':
@@ -906,9 +968,9 @@ export function onIdleTimeout() {
         await flushEdits();
         await send({ type: 'auto_complete' });
       });
+    case 'finish': return finish();
+    case 'reset': return resetToWelcome();
   }
-  if (st === 'QR_READY') return finish();
-  if (st === 'FINISHED' || st === 'ERROR') return resetToWelcome();
 }
 
 /** prototype init(); go('welcome') */

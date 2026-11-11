@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { del, get, patch } from '../api';
+import { del, get, patch, post } from '../api';
 import { toast, usePoll } from '../ui';
 
 // text = true: min/max are character counts, value saved as string.
@@ -21,6 +21,7 @@ const TIMERS: Field[] = [
   ['frameSeconds', 'Pilih frame', 15, 3600, 1, 'detik'],
   ['pickSeconds', 'Pilih foto per slot', 15, 3600, 1, 'detik'],
   ['editingSeconds', 'Edit foto', 15, 3600, 1, 'detik'],
+  ['registrationSeconds', 'Registrasi pelanggan', 15, 3600, 1, 'detik'],
   ['finalSeconds', 'Preview akhir', 15, 3600, 1, 'detik'],
   ['qrSeconds', 'QR unduh', 10, 3600, 1, 'detik'],
   ['thanksSeconds', 'Terima kasih', 3, 600, 1, 'detik'],
@@ -65,12 +66,116 @@ export function Settings() {
         nest="display"
         fields={DISPLAY}
       />
+      <EmailSection />
+      <RegistrationSection />
       <Section
         title="Robot"
         hint="Langsung dikirim ke service dobot (tanpa restart). Turunkan kecepatan kalau gerak robot terlalu kasar."
         path="/api/admin/robot-settings"
         fields={ROBOT}
       />
+    </div>
+  );
+}
+
+// Same rule as backend mailer.ValidAddress: local part, '@', domain with a dot.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function EmailSection() {
+  const [status, , err] = usePoll<{ configured: boolean; sender: string }>(() => get('/api/admin/email'));
+  const [to, setTo] = useState('');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const valid = EMAIL_RE.test(to.trim());
+
+  const sendTest = async () => {
+    setSending(true);
+    setResult(null);
+    try {
+      await post('/api/admin/email/test', { to: to.trim() });
+      setResult({ ok: true, text: `Email uji terkirim ke ${to.trim()}. Cek kotak masuk (atau folder spam).` });
+    } catch (e) {
+      setResult({ ok: false, text: (e as Error).message });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Email</h2>
+      <p className="mu small">
+        Akun Gmail booth untuk mengirim Email Foto. Diatur lewat SMTP_USER dan SMTP_APP_PASSWORD di .env backend (butuh 2-Step Verification untuk membuat
+        App Password), lalu restart backend.
+      </p>
+      {err ? <div className="chip err">{err}</div> : null}
+      {status ? (
+        <p>
+          {status.configured ? (
+            <span className="chip ok">Email aktif · {status.sender}</span>
+          ) : (
+            <span className="chip warn">Email belum diatur</span>
+          )}
+        </p>
+      ) : null}
+      <div className="form">
+        <label className="f">
+          Alamat tujuan email uji
+          <input type="email" value={to} placeholder="nama@contoh.com" onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      <div className="btns" style={{ marginTop: 14 }}>
+        <button className="btn pr" disabled={!status?.configured || !valid || sending} onClick={() => void sendTest()}>
+          {sending ? 'Mengirim…' : 'Kirim email uji'}
+        </button>
+      </div>
+      {result ? (
+        <div className={`chip ${result.ok ? 'ok' : 'err'}`} style={{ marginTop: 10 }}>
+          {result.text}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RegistrationSection() {
+  const [settings, reload, err] = usePoll<{ registrationEnabled?: boolean }>(() => get('/api/admin/settings'));
+  const [email] = usePoll<{ configured: boolean }>(() => get('/api/admin/email'));
+  const [saving, setSaving] = useState(false);
+  const on = settings?.registrationEnabled === true;
+
+  const toggle = async (enabled: boolean) => {
+    setSaving(true);
+    try {
+      await patch('/api/admin/settings', { registrationEnabled: enabled });
+      toast(enabled ? 'Registrasi pelanggan aktif' : 'Registrasi pelanggan dimatikan');
+      await reload();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Registrasi pelanggan</h2>
+      <p className="mu small">
+        Setelah pembayaran (atau MULAI FOTO di mode gratis), pelanggan mengisi nama dan email untuk menerima Email Foto. Hanya bisa dinyalakan kalau
+        email booth sudah diatur. Berlaku saat booth kembali ke layar awal.
+      </p>
+      {err ? <div className="chip err">{err}</div> : null}
+      {on && email && !email.configured ? <div className="chip warn">Email belum diatur: layar registrasi tidak tampil di booth.</div> : null}
+      <label className="f" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={!settings || saving || (!on && email?.configured === false)}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        Tampilkan layar registrasi di booth
+      </label>
+      {!on && email?.configured === false ? <p className="small">Atur email booth di bagian Email terlebih dulu.</p> : null}
     </div>
   );
 }

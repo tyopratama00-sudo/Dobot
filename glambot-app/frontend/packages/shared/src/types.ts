@@ -64,6 +64,14 @@ export interface SessionPlan {
   readySeconds: number;
 }
 
+/** Pelanggan name + email typed on the booth (Registrasi; per session, not an account). */
+export interface RegistrationDTO {
+  name: string;
+  email: string;
+  /** Optional WhatsApp number as the backend stores it (e.g. 6281234567890); '' = none. */
+  whatsapp?: string;
+}
+
 export interface SessionSnapshot {
   id: string;
   code: string;
@@ -83,6 +91,8 @@ export interface SessionSnapshot {
   capture: { angle: number | null; shot: number | null; retakeAngle: number | null };
   print: PrintDTO | null;
   gallery: GalleryDTO | null;
+  /** Registrasi saved on the paid backend session; absent/null = none (switch off or timed out). */
+  registration?: RegistrationDTO | null;
   version: number;
   updatedAt: string;
 }
@@ -116,6 +126,8 @@ export interface BoothConfig {
   freeDigitalOnly?: boolean;
   /** Explicit admin free/paid mode; independent of a package's price. */
   freeMode?: boolean;
+  /** Show the Registrasi screen after payment: admin switch on and booth email configured. */
+  registrationScreen?: boolean;
   environment: string;
 }
 
@@ -142,9 +154,22 @@ export interface ComponentHealth {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * Longest Registrasi name and email, as the backend enforces them (handlers
+ * maxRegistrationName, mailer.MaxAddressLen). Shared by this schema and the booth screens.
+ */
+export const REGISTRATION_LIMITS = { name: 80, email: 254 } as const;
+
 /** Commands the booth sends to POST /api/sessions/:id/commands */
 export const sessionCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('begin') }),
+  /**
+   * Lanjut on the registration screen: save name + email (+ optional WhatsApp number as typed;
+   * '' clears it, absent keeps the stored one), then frame selection.
+   */
+  z.object({ type: z.literal('register'), name: z.string().min(1).max(REGISTRATION_LIMITS.name), email: z.string().min(3).max(REGISTRATION_LIMITS.email), whatsapp: z.string().max(40).optional() }),
+  /** Registration screen timed out: frame selection without a registration. */
+  z.object({ type: z.literal('registration_timeout') }),
   z.object({ type: z.literal('move'), angle: z.number().int().min(0).max(19) }),
   z.object({ type: z.literal('countdown'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),
   z.object({ type: z.literal('capture'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),

@@ -94,8 +94,21 @@ describe('session state machine', () => {
     expect(canTransition('GENERATING_GALLERY', 'GALLERY_READY')).toBe(true);
   });
 
+  it('puts registration between the paid ticket and frame selection', () => {
+    expect(transition('PAYMENT_SUCCESS', 'START_REGISTRATION')).toBe('REGISTRATION');
+    expect(transition('REGISTRATION', 'REGISTERED')).toBe('FRAME_SELECTION');
+    // Timeout continues the paid session without a registration.
+    expect(transition('REGISTRATION', 'TIMEOUT')).toBe('FRAME_SELECTION');
+    // No skip: nothing else leaves the registration screen, and it cannot be reached before payment.
+    expect(canTransition('REGISTRATION', 'CANCEL')).toBe(false);
+    expect(canTransition('REGISTRATION', 'BACK')).toBe(false);
+    expect(canTransition('WAITING_PAYMENT', 'START_REGISTRATION')).toBe(false);
+    expect(isPaid('REGISTRATION')).toBe(true);
+    expect(screenForState('REGISTRATION')).toBe('register');
+  });
+
   it('maps every state to a prototype screen', () => {
-    for (const s of SESSION_STATES) expect(screenForState(s)).toMatch(/^(welcome|pay|ready|session|review|tpl|pick|edit|final|print|qr|thanks|error)$/);
+    for (const s of SESSION_STATES) expect(screenForState(s)).toMatch(/^(welcome|pay|register|ready|session|review|tpl|pick|edit|final|print|qr|thanks|error)$/);
     expect(screenForState('COUNTDOWN')).toBe('session');
     expect(screenForState('QR_READY')).toBe('qr');
   });

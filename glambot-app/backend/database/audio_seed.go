@@ -4,7 +4,7 @@ import "fmt"
 
 // AudioTabs: urutan tab halaman Audio admin. "unused" = file lama yang tidak
 // dipanggil kode booth.
-var AudioTabs = []string{"welcome", "pay", "pay_free", "package", "frame", "capture", "review", "pick", "edit", "final", "qr", "system", "unused"}
+var AudioTabs = []string{"welcome", "pay", "pay_free", "register", "package", "frame", "capture", "review", "pick", "edit", "final", "qr", "system", "unused"}
 
 type audioSeed struct {
 	id, tab, when string
@@ -28,6 +28,9 @@ func audioSeeds() []audioSeed {
 		{"pay_retry", "pay", "Pembayaran gagal", 5},
 
 		{"pay_free", "pay_free", "Masuk halaman bayar Mode Gratis", 6},
+
+		{"reg_show", "register", "Masuk halaman registrasi (isi nama dan email)", 6},
+		{"reg_typo", "register", "Email kemungkinan salah ketik, muncul saran domain", 4},
 
 		{"pay_mode", "package", "Masuk halaman pilih paket", 6},
 		{"pay_qty", "package", "Setelah pay_mode, menjelaskan jumlah cetak", 6},
