@@ -55,17 +55,25 @@ test('a session in REGISTRATION shows the registration screen', () => {
 });
 
 test('Lanjut saves the registration and opens frame selection', async () => {
-  submitRegistration('Rina', 'rina@gmail.com');
+  submitRegistration('Rina', 'rina@gmail.com', '');
 
   await vi.waitFor(() => expect(currentScreen(get())).toBe('tpl'));
-  expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com' }, expect.anything());
+  // No WhatsApp number typed: sent as '' so an earlier number is cleared, not kept.
+  expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '' }, expect.anything());
   expect(get().session?.registration).toEqual({ name: 'Rina', email: 'rina@gmail.com' });
+});
+
+test('Lanjut sends the optional WhatsApp number with the registration', async () => {
+  submitRegistration('Rina', 'rina@gmail.com', '0812-3456-7890');
+
+  await vi.waitFor(() => expect(currentScreen(get())).toBe('tpl'));
+  expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '0812-3456-7890' }, expect.anything());
 });
 
 test('a rejected registration stays on the screen and tells the customer why', async () => {
   api.command.mockRejectedValueOnce(new ApiError(400, 'HTTP_400', 'Alamat email tidak valid', 'Alamat email tidak valid'));
 
-  submitRegistration('Rina', 'rina@x');
+  submitRegistration('Rina', 'rina@x', '');
 
   await vi.waitFor(() => expect(get().notice).toBe('Alamat email tidak valid'));
   expect(currentScreen(get())).toBe('register');

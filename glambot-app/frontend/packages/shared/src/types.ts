@@ -68,6 +68,8 @@ export interface SessionPlan {
 export interface RegistrationDTO {
   name: string;
   email: string;
+  /** Optional WhatsApp number as the backend stores it (e.g. 6281234567890); '' = none. */
+  whatsapp?: string;
 }
 
 export interface SessionSnapshot {
@@ -155,8 +157,11 @@ export interface ComponentHealth {
 /** Commands the booth sends to POST /api/sessions/:id/commands */
 export const sessionCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('begin') }),
-  /** Lanjut on the registration screen: save name + email, then frame selection. */
-  z.object({ type: z.literal('register'), name: z.string().min(1).max(80), email: z.string().min(3).max(254) }),
+  /**
+   * Lanjut on the registration screen: save name + email (+ optional WhatsApp number as typed;
+   * '' clears it, absent keeps the stored one), then frame selection.
+   */
+  z.object({ type: z.literal('register'), name: z.string().min(1).max(80), email: z.string().min(3).max(254), whatsapp: z.string().max(40).optional() }),
   /** Registration screen timed out: frame selection without a registration. */
   z.object({ type: z.literal('registration_timeout') }),
   z.object({ type: z.literal('move'), angle: z.number().int().min(0).max(19) }),

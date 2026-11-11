@@ -526,9 +526,12 @@ export function backFromPay() {
 
 /* ------------------------------------------------------------------ registration */
 
-/** Lanjut on the registration screen. A rejection (e.g. invalid email) keeps the screen and shows why. */
-export function submitRegistration(name: string, email: string) {
-  void guard('register', () => send({ type: 'register', name, email }));
+/**
+ * Lanjut on the registration screen. A rejection (e.g. invalid email) keeps the screen and shows why.
+ * The WhatsApp number is always sent ('' = none), so a second Lanjut also clears an old one.
+ */
+export function submitRegistration(name: string, email: string, whatsapp: string) {
+  void guard('register', () => send({ type: 'register', name, email, whatsapp }));
 }
 
 /** Ubah email on the QR screen opened: the pelanggan gets the full QR time again. */

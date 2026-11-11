@@ -1947,7 +1947,7 @@ img {
 }
 .reg-fields {
   display: grid;
-  grid-template-columns: 1fr 1.4fr auto;
+  grid-template-columns: 1fr 1.3fr 1fr auto;
   gap: 20px;
   width: min(100%, 1640px);
   align-items: stretch;

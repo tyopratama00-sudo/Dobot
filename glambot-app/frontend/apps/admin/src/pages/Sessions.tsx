@@ -17,13 +17,20 @@ interface Sess {
   completed_at?: string;
   registration_name: string;
   registration_email: string;
+  /** Nomor WhatsApp ternormalisasi (mis. 6281234567890); '' bila tidak diisi. */
+  registration_whatsapp: string;
   registered_at: string | null;
 }
 /** Registrasi melekat pada sesi (ADR 0001); null bila belum registrasi. */
 interface Registration {
   name: string;
   email: string;
+  /** Nomor WhatsApp ternormalisasi; '' bila tidak diisi. */
+  whatsapp: string;
   registered_at: string;
+  /** Link wa.me berisi pesan siap kirim; null bila belum bisa, alasannya di whatsapp_link_reason. */
+  whatsapp_link: string | null;
+  whatsapp_link_reason: string;
 }
 interface Detail {
   session: Sess;
@@ -81,7 +88,7 @@ function SessionList() {
       <div className="card">
         <div className="form">
           <label className="f">
-            Cari ID sesi, nama, atau email
+            Cari ID sesi, nama, email, atau no. WhatsApp
             <input value={f.search} onChange={(e) => set({ search: e.target.value })} />
           </label>
           <label className="f">
@@ -169,7 +176,7 @@ function RegistrationSection({
     if (await run('resend', () => post(`${path}/email-foto/resend`, { email: email.trim() }), 'Email Foto diantre ulang')) await reload();
   };
   const forget = async () => {
-    if (!confirm('Hapus nama dan email pelanggan dari sesi ini? Email Foto yang belum terkirim dibatalkan. Tindakan ini tidak bisa dibatalkan.')) return;
+    if (!confirm('Hapus nama, email, dan nomor WhatsApp pelanggan dari sesi ini? Email Foto yang belum terkirim dibatalkan. Tindakan ini tidak bisa dibatalkan.')) return;
     if (await run('delete', () => del(`${path}/registration`), 'Data registrasi dihapus')) {
       setEmail('');
       await reload();
@@ -188,6 +195,7 @@ function RegistrationSection({
   const rows: [string, ReactNode][] = [
     ['Nama', deleted ? <span className="mu">Data registrasi dihapus</span> : registration.name],
     ['Email', deleted ? '—' : registration.email],
+    ['WhatsApp', registration.whatsapp ? <span className="mono">+{registration.whatsapp}</span> : '—'],
     ['Waktu registrasi', dt(registration.registered_at)],
   ];
   if (emailFoto) {
@@ -223,6 +231,19 @@ function RegistrationSection({
           <button className="btn pr" disabled={busy !== null} onClick={() => void resend()}>
             {busy === 'resend' ? 'Mengantre…' : 'Kirim ulang'}
           </button>
+          {/* Semi-manual: membuka WhatsApp dengan pesan siap kirim; staf yang menekan kirim. */}
+          {registration.whatsapp_link ? (
+            <a className="btn" href={registration.whatsapp_link} target="_blank" rel="noopener noreferrer">
+              Kirim via WhatsApp
+            </a>
+          ) : (
+            <>
+              <button className="btn" disabled title={registration.whatsapp_link_reason}>
+                Kirim via WhatsApp
+              </button>
+              <span className="mu small">{registration.whatsapp_link_reason}</span>
+            </>
+          )}
           <span className="spacer" />
           <button className="btn er" disabled={busy !== null} onClick={() => void forget()}>
             {busy === 'delete' ? 'Menghapus…' : 'Hapus data registrasi'}

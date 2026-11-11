@@ -2,7 +2,9 @@
  * Email rules shared by the registration screen and (later) the QR screen "Ubah email".
  * Same rule as backend mailer.ValidAddress: a local part, '@', and a domain containing a dot.
  */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { isValidWhatsApp } from './whatsapp';
+
+const EMAIL_RE =/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email.trim());
@@ -49,7 +51,7 @@ export function suggestEmail(email: string): string | null {
   return best ? `${local}@${best}` : null;
 }
 
-/** Basic check that enables Lanjut: a non-empty name and a valid email. */
-export function canSubmitRegistration(name: string, email: string): boolean {
-  return name.trim().length > 0 && isValidEmail(email);
+/** Basic check that enables Lanjut: a non-empty name, a valid email, and a valid or empty WhatsApp number. */
+export function canSubmitRegistration(name: string, email: string, whatsapp = ''): boolean {
+  return name.trim().length > 0 && isValidEmail(email) && isValidWhatsApp(whatsapp);
 }
