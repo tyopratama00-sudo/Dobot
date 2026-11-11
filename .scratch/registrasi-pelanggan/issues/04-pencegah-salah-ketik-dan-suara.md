@@ -11,7 +11,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Booth flow: email module, explana
 
 **Blocked by:** 03 (registrasi di booth)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 290c71c (merge 903b724)
 
 - [ ] Pure email module: validation (local part, `@`, domain with a dot) and a domain suggestion for gmail.com, yahoo.com, yahoo.co.id, hotmail.com, outlook.com, icloud.com based on edit distance; no suggestion for correct or unknown domains
 - [ ] The backend uses the same validation rule as the booth

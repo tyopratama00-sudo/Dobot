@@ -28,7 +28,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md`. Glossary: `GLOSSARY.md` (Registra
 
 **Blocked by:** None (tickets 01-08 are merged)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di df7521b (merge dcd2cde)
 
 - [ ] Session has a WhatsApp field (idempotent boot migration). The registration endpoint accepts an optional `whatsapp`, normalises and validates it (400 on invalid), stores it, and returns it.
 - [ ] Re-saving the registration without `whatsapp` behaves consistently. Document whether it keeps or clears the stored number, and make the booth send it explicitly.

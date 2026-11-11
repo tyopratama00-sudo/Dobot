@@ -13,7 +13,7 @@ Expect conflicts in booth `flow.ts` / `api/client.ts` if you reuse it.
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 4c670f1 (A–E) + 18aa78e (F–H, cleanups), langsung di feat/registrasi-pelanggan
 
 ## Safety (mandatory)
 - **Real database.** Never run `go test ./handlers` or `./...` without `-run`: `TestFreeModeRoundTrip` and `admin_extra_test.go` use `testDB(t)`, which writes to the real booth DB.

@@ -6,7 +6,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Settings and configuration; Email
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 3d5217f (merge 73a22d6)
 
 - [ ] Gmail credentials come from the backend environment under exactly these names (the owner may already have filled them in): `SMTP_USER`, `SMTP_APP_PASSWORD`, optional `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (default `587`, STARTTLS) and `SMTP_FROM_NAME`
 - [ ] Email counts as configured only when user and password are both set

@@ -10,7 +10,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Booth flow: QR screen; Email Foto
 
 **Blocked by:** 01 (waktu habis layar QR), 03 (registrasi di booth), 05 (Email Foto terkirim)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di ee0620c (merge 39cbc66)
 
 - [ ] QR screen shows the email line and the Ubah email button only when the session has a registration
 - [ ] The dialog reuses the on-screen keyboard and the email module (validation and suggestion)

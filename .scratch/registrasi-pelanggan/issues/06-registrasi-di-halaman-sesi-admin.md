@@ -6,7 +6,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Admin panel).
 
 **Blocked by:** 03 (registrasi di booth)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di e5e68a6 (merge 9bf5687)
 
 - [ ] Admin session list returns name and email, and the Sesi list shows them as columns
 - [ ] The existing search matches session id, name or email (partial, case-insensitive)

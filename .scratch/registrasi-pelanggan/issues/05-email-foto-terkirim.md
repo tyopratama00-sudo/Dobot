@@ -20,7 +20,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Domain and data: delivery record;
 
 **Blocked by:** 02 (pengirim email Gmail), 03 (registrasi di booth)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 6949fb9 + 68c4fc0 (merge 80897bd)
 
 - [ ] Each session with a registration gets a delivery record:
   - recipient, status (pending, sent, failed, skipped);

@@ -15,7 +15,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Domain and data; Settings and con
 
 **Blocked by:** 02 (pengirim email Gmail)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di d3ae0a1 (merge 331e29b)
 
 - [ ] Session stores registration name, email and registration time (idempotent boot migration); there is no customer or account table
 - [ ] The registration is attached to the backend session that was actually paid, or to the confirmed free session

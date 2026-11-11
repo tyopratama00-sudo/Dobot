@@ -8,7 +8,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Domain and data: deletion; Email 
 
 **Blocked by:** 05 (Email Foto terkirim), 06 (registrasi di halaman Sesi admin)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 12d1fb7 (merge 1313109)
 
 - [ ] Admin session detail returns and shows delivery status, reason, attempts and sent time
 - [ ] Resend endpoint resets the delivery to pending with attempts cleared; with an address it validates it and updates both the registration email and the recipient

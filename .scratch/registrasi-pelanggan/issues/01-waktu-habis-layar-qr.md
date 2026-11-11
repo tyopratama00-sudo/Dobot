@@ -6,7 +6,7 @@ Spec: `.scratch/registrasi-pelanggan/spec.md` (Booth flow, last decision).
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 363863f (merge eae9f00)
 
 - [ ] A booth flow test reproduces the bug (QR timeout does not reach FINISHED), or the ticket reports that the bug does not exist
 - [ ] QR screen timeout moves the session to FINISHED (thanks screen)
