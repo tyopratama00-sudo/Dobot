@@ -9,7 +9,7 @@ Orang yang memakai booth dalam satu sesi. Tidak disimpan sebagai data tersendiri
 _Avoid_: Member, user, akun
 
 **Registrasi**:
-Nama dan email yang wajib diisi pelanggan untuk satu sesi, sebagai jalur cadangan pengiriman foto dan catatan kunjungan. Bukan pembuatan akun, dan registrasi dari sesi berbeda tidak digabung walau emailnya sama.
+Nama dan email yang wajib diisi pelanggan untuk satu sesi, ditambah nomor WhatsApp yang boleh dikosongkan, sebagai jalur cadangan pengiriman foto dan catatan kunjungan. Bukan pembuatan akun, dan registrasi dari sesi berbeda tidak digabung walau emailnya sama.
 _Avoid_: Akun, pendaftaran akun, sign up, data member
 
 **Email Foto**:

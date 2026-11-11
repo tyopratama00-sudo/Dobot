@@ -201,7 +201,8 @@ Admin bisa melihat dan mencari registrasi di halaman Sesi, memantau status Email
 ## Out of Scope
 
 - Promotional use of registration data (newsletters, WhatsApp blasts) and any marketing opt-in.
-- Phone number, WhatsApp, Instagram, and "tag my Instagram".
+- Phone number, Instagram, and "tag my Instagram". (WhatsApp was added later as an optional, staff-sent backup; see ticket 09.)
+- Sending WhatsApp messages automatically (WhatsApp Business Platform or unofficial gateways). Ticket 09 only prepares a click-to-chat link that staff send by hand.
 - CSV or other export of registrations.
 - An admin-editable email template.
 - Detecting whether the QR was scanned or opened, and sending only when it was not. For now every registration gets the Email Foto.
