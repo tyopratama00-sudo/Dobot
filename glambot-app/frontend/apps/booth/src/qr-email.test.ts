@@ -1,13 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-const { api, ApiError } = vi.hoisted(() => {
-  class ApiError extends Error {
-    constructor(public status: number, public code: string, message: string, public userMessage?: string) {
-      super(message);
-    }
-  }
+import { MockApiError as ApiError } from './api-error.mock';
+
+const { api } = vi.hoisted(() => {
   return {
-    ApiError,
     api: {
       sessionId: 's1',
       command: vi.fn(),
@@ -20,9 +16,9 @@ const { api, ApiError } = vi.hoisted(() => {
   };
 });
 
-vi.mock('./api/client', () => ({
+vi.mock('./api/client', async () => ({
   api,
-  ApiError,
+  ApiError: (await import('./api-error.mock')).MockApiError,
   NetworkError: class extends Error {},
   newRequestId: () => 'req',
   onConnectivity: () => () => undefined,
@@ -76,7 +72,7 @@ test('saving a new email from the QR screen updates the registration and restart
   expect(get().timerFrom).toBe(Date.parse('2026-11-10T10:00:40Z'));
 });
 
-test('a rejected email change keeps the old email and tells the customer why', async () => {
+test('a rejected email change keeps the old email and tells the pelanggan why', async () => {
   api.saveRegistration.mockRejectedValueOnce(new ApiError(400, 'HTTP_400', 'Alamat email tidak valid', 'Alamat email tidak valid'));
 
   const saved = await saveEmailChange('rina@x');

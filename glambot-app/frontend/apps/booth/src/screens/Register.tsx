@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { REGISTRATION_LIMITS } from '@photobooth/shared';
 import { useBooth } from '../store';
 import { submitRegistration } from '../flow';
 import { canSubmitRegistration, isValidEmail, suggestEmail } from '../email';
@@ -9,7 +10,7 @@ import { OnScreenKeyboard } from '../components/OnScreenKeyboard';
 import { Icon } from '../components/basics';
 
 type Field = 'name' | 'email' | 'whatsapp';
-const MAX: Record<Field, number> = { name: 80, email: 254, whatsapp: 24 };
+const MAX: Record<Field, number> = { ...REGISTRATION_LIMITS, whatsapp: 24 };
 /** The typo voice waits for a pause in typing, so "gmail.c" on the way to "gmail.com" stays quiet. */
 const TYPO_VOICE_MS = 1500;
 

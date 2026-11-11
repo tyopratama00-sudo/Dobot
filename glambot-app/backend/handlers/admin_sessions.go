@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"photobooth/database"
+	"photobooth/models"
 	"photobooth/services"
 
 	"github.com/go-chi/chi/v5"
@@ -169,7 +170,7 @@ func registrationOf(s adminSession, now time.Time) *sessionRegistration {
 	switch {
 	case s.RegistrationWhatsApp == "":
 		reg.WhatsAppLinkReason = "Belum ada nomor WhatsApp"
-	case s.Status == "expired" || !s.expiresAt.After(now):
+	case s.Status == string(models.StatusExpired) || !s.expiresAt.After(now):
 		reg.WhatsAppLinkReason = "Sesi sudah kedaluwarsa, foto sudah dihapus"
 	case s.DriveURL == "":
 		reg.WhatsAppLinkReason = "Link foto belum tersedia (Google Drive)"

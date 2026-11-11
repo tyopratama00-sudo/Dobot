@@ -39,19 +39,20 @@ Expect conflicts in booth `flow.ts` / `api/client.ts` if you reuse it.
 - [x] **E. `ResendEmailFoto` checks status and expiry outside its transaction.** Do the check under the row lock.
 
 ## Smaller fixes
-- [ ] **F. Wrong skip reason.** With Drive off, no strip, but raw photos present, the reason says "tidak ada foto". Use an accurate one, such as "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif".
-- [ ] **G. `SMTP_FROM_NAME` has no effect on Email Foto.** The sender name should be `SMTP_FROM_NAME` when set, else the admin brand label, else "Glambot Photo Booth". Keep the WhatsApp message's booth name consistent, and document it.
-- [ ] **H. Pengaturan shows the stored switch, not the effective one.** When the registration switch is on but email is not configured, show a warning that registration is hidden from the booth.
+- [x] **F. Wrong skip reason.** With Drive off, no strip, but raw photos present, the reason says "tidak ada foto". Use an accurate one, such as "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif".
+- [x] **G. `SMTP_FROM_NAME` has no effect on Email Foto.** The sender name should be `SMTP_FROM_NAME` when set, else the admin brand label, else "Glambot Photo Booth". Keep the WhatsApp message's booth name consistent, and document it.
+- [x] **H. Pengaturan shows the stored switch, not the effective one.** When the registration switch is on but email is not configured, show a warning that registration is hidden from the booth.
+  - Already in place since d3ae0a1: Settings shows "Email belum diatur: layar registrasi tidak tampil di booth." No change needed.
 
 ## Cleanups (judgement calls)
-- [ ] One Go helper for email normalisation and validation (registration, admin resend, `ResendEmailFoto`), and one source for the 80/254 limits on each side (TS module shared by the zod schema, `Register.tsx` and `EmailChange.tsx`).
-- [ ] Use the Email Foto status constants and `models.StatusExpired` instead of raw strings. Reuse the "photos gone" reason constant in `services/cleanup.go`, avoiding an import cycle.
-- [ ] Rename the booth `registrationOn` / `BoothConfig.registration` boolean to one clear name, so it no longer collides with `SessionSnapshot.registration`.
-- [ ] Replace "customer" with "pelanggan" in new comments and test names (GLOSSARY.md). Fix the stale "(later) the QR screen" comment in booth `email.ts`.
-- [ ] Share the mocked `ApiError` across booth test files if it fits.
+- [x] One Go helper for email normalisation and validation (registration, admin resend, `ResendEmailFoto`), and one source for the 80/254 limits on each side (TS module shared by the zod schema, `Register.tsx` and `EmailChange.tsx`).
+- [x] Use the Email Foto status constants and `models.StatusExpired` instead of raw strings. Reuse the "photos gone" reason constant in `services/cleanup.go`, avoiding an import cycle.
+- [x] Rename the booth `registrationOn` / `BoothConfig.registration` boolean to one clear name, so it no longer collides with `SessionSnapshot.registration`.
+- [x] Replace "customer" with "pelanggan" in new comments and test names (GLOSSARY.md). Fix the stale "(later) the QR screen" comment in booth `email.ts`.
+- [x] Share the mocked `ApiError` across booth test files if it fits.
 
 ## Done when
-- [ ] Every behaviour fix has a test that failed first.
-- [ ] Backend build and vet pass; the safe filtered Go tests, mailer, routes and services pass.
-- [ ] Vitest, tsc, and the booth and admin builds pass.
-- [ ] The work is committed on `feat/registrasi-pelanggan`, or merged into it.
+- [x] Every behaviour fix has a test that failed first.
+- [x] Backend build and vet pass; the safe filtered Go tests, mailer, routes and services pass.
+- [x] Vitest, tsc, and the booth and admin builds pass.
+- [x] The work is committed on `feat/registrasi-pelanggan`, or merged into it.

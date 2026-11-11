@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"photobooth/config"
 	"photobooth/database"
 	"photobooth/mailer"
 	"photobooth/models"
@@ -33,12 +34,12 @@ import (
 // Jadi hapus atau ganti email yang sudah commit lebih dulu selalu menang,
 // dan yang datang selagi email sedang dikirim menunggu sampai kirim selesai.
 
-// Status catatan pengiriman.
+// Status catatan pengiriman (sumbernya models).
 const (
-	EmailFotoPending = "pending"
-	EmailFotoSent    = "sent"
-	EmailFotoFailed  = "failed"
-	EmailFotoSkipped = "skipped"
+	EmailFotoPending = models.EmailFotoPending
+	EmailFotoSent    = models.EmailFotoSent
+	EmailFotoFailed  = models.EmailFotoFailed
+	EmailFotoSkipped = models.EmailFotoSkipped
 )
 
 // Isi yang terkirim.
@@ -64,8 +65,10 @@ const (
 	defaultBoothName     = "Glambot Photo Booth"
 
 	reasonNoPhotos    = "tidak ada foto"
+	reasonNoDrive     = "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif"
+	reasonNoDriveLink = "tidak ada yang bisa dikirim: strip belum jadi dan link Drive tidak tersedia"
 	reasonDataDeleted = "data dihapus"
-	reasonPhotosGone  = "sesi kedaluwarsa, foto sudah dihapus"
+	reasonPhotosGone  = models.EmailFotoReasonPhotosGone
 )
 
 // Jeda percobaan ulang setelah gagal ke-1, ke-2, ke-3; sesudahnya tiap jam.
@@ -114,31 +117,32 @@ func GetEmailFotoDelivery(sessionID string) (EmailFotoDelivery, error) {
 // gagal/dilewati) mengantre pengiriman baru ke alamat itu. Alamat yang sama
 // tidak mengubah apa pun.
 func queueEmailFoto(q sqlRunner, sessionID, email string) error {
+	// EXCLUDED.status = EmailFotoPending.
 	_, err := q.Exec(`
-		INSERT INTO email_deliveries (session_id, recipient) VALUES (?, ?)
+		INSERT INTO email_deliveries (session_id, recipient, status) VALUES (?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			recipient = EXCLUDED.recipient,
-			status = 'pending',
-			content = CASE WHEN email_deliveries.status = 'pending' THEN email_deliveries.content ELSE '' END,
-			attempts = CASE WHEN email_deliveries.status = 'pending' THEN email_deliveries.attempts ELSE 0 END,
-			next_attempt_at = CASE WHEN email_deliveries.status = 'pending' THEN email_deliveries.next_attempt_at ELSE NULL END,
-			last_error = CASE WHEN email_deliveries.status = 'pending' THEN email_deliveries.last_error ELSE '' END,
-			sent_at = CASE WHEN email_deliveries.status = 'pending' THEN email_deliveries.sent_at ELSE NULL END,
+			status = EXCLUDED.status,
+			content = CASE WHEN email_deliveries.status = EXCLUDED.status THEN email_deliveries.content ELSE '' END,
+			attempts = CASE WHEN email_deliveries.status = EXCLUDED.status THEN email_deliveries.attempts ELSE 0 END,
+			next_attempt_at = CASE WHEN email_deliveries.status = EXCLUDED.status THEN email_deliveries.next_attempt_at ELSE NULL END,
+			last_error = CASE WHEN email_deliveries.status = EXCLUDED.status THEN email_deliveries.last_error ELSE '' END,
+			sent_at = CASE WHEN email_deliveries.status = EXCLUDED.status THEN email_deliveries.sent_at ELSE NULL END,
 			updated_at = NOW()
-		WHERE email_deliveries.recipient <> EXCLUDED.recipient`, sessionID, email)
+		WHERE email_deliveries.recipient <> EXCLUDED.recipient`, sessionID, email, EmailFotoPending)
 	return err
 }
 
 // ResendEmailFoto (Kirim ulang admin) mengembalikan pengiriman ke pending
 // dengan percobaan dari nol. email kosong = kirim ke alamat registrasi yang
 // ada; email terisi = alamat yang diperbaiki, sekaligus mengganti email
-// registrasi sesi. Pemanggil memvalidasi email (mailer.ValidAddress). Hanya
+// registrasi sesi. Pemanggil memvalidasi email (mailer.NormalizeAddress). Hanya
 // untuk sesi yang punya Registrasi yang belum dihapus; status dan
 // kedaluwarsa diperiksa di bawah kunci baris sesi.
 // Error: sql.ErrNoRows (sesi tidak ada), ErrNoRegistration,
 // ErrEmailFotoPhotosGone.
 func ResendEmailFoto(sessionID, email string) error {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email, _ = mailer.NormalizeAddress(email)
 
 	tx, err := database.DB.Begin()
 	if err != nil {
@@ -173,11 +177,11 @@ func ResendEmailFoto(sessionID, email string) error {
 		return err
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO email_deliveries (session_id, recipient) VALUES (?, ?)
+		INSERT INTO email_deliveries (session_id, recipient, status) VALUES (?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
-			recipient = EXCLUDED.recipient, status = 'pending', content = '',
+			recipient = EXCLUDED.recipient, status = EXCLUDED.status, content = '',
 			attempts = 0, next_attempt_at = NULL, last_error = '', sent_at = NULL,
-			updated_at = NOW()`, sessionID, email); err != nil {
+			updated_at = NOW()`, sessionID, email, EmailFotoPending); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -205,11 +209,11 @@ func DeleteSessionRegistration(sessionID string) error {
 	if _, err := tx.Exec(`
 		UPDATE email_deliveries SET
 			recipient = '',
-			last_error = CASE WHEN status = 'pending' THEN ? ELSE last_error END,
-			status = CASE WHEN status = 'pending' THEN 'skipped' ELSE status END,
+			last_error = CASE WHEN status = ? THEN ? ELSE last_error END,
+			status = CASE WHEN status = ? THEN ? ELSE status END,
 			next_attempt_at = NULL,
 			updated_at = NOW()
-		WHERE session_id = ?`, reasonDataDeleted, sessionID); err != nil {
+		WHERE session_id = ?`, EmailFotoPending, reasonDataDeleted, EmailFotoPending, EmailFotoSkipped, sessionID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -268,9 +272,9 @@ func RunEmailFotoDispatch(now time.Time) {
 func dueEmailFoto(now time.Time) ([]string, error) {
 	rows, err := database.DB.Query(`
 		SELECT session_id FROM email_deliveries
-		WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		WHERE status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		ORDER BY created_at
-		LIMIT ?`, now, emailFotoBatch)
+		LIMIT ?`, EmailFotoPending, now, emailFotoBatch)
 	if err != nil {
 		return nil, err
 	}
@@ -293,8 +297,8 @@ func lockEmailFoto(tx *database.TxWrapper, sessionID string, now time.Time) (pen
 	p := pendingEmailFoto{SessionID: sessionID}
 	if err := tx.QueryRow(`
 		SELECT recipient, last_error, attempts FROM email_deliveries
-		WHERE session_id = ? AND status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-		FOR UPDATE`, sessionID, now,
+		WHERE session_id = ? AND status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+		FOR UPDATE`, sessionID, EmailFotoPending, now,
 	).Scan(&p.Recipient, &p.LastError, &p.Attempts); err != nil {
 		return p, err
 	}
@@ -344,12 +348,12 @@ func dispatchEmailFoto(m mailer.Mailer, booth string, now time.Time, sessionID s
 		return
 	}
 
-	content, strip, ready := emailFotoReadiness(now, p)
+	content, strip, skip, ready := emailFotoReadiness(now, p)
 	if !ready {
 		return
 	}
 	if content == "" {
-		finishEmailFoto(tx, sessionID, EmailFotoSkipped, reasonNoPhotos)
+		finishEmailFoto(tx, sessionID, EmailFotoSkipped, skip)
 		commit()
 		return
 	}
@@ -406,26 +410,27 @@ func finishEmailFoto(q sqlRunner, sessionID, status, reason string) {
 }
 
 // emailFotoReadiness menerapkan aturan kesiapan. ready=false: tunggu putaran
-// berikutnya. ready=true dengan content kosong: tidak ada foto untuk dikirim.
-func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, strip *mailer.Attachment, ready bool) {
+// berikutnya. ready=true dengan content kosong: tidak ada yang bisa dikirim,
+// skip berisi alasannya.
+func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, strip *mailer.Attachment, skip string, ready bool) {
 	driveOn := services.IsDriveEnabled()
 	link := driveOn && p.DriveURL != ""
 
 	if strip = emailFotoStrip(p.SessionID); strip != nil {
 		switch {
 		case link && p.DriveSynced:
-			return EmailFotoLinkStrip, strip, true
+			return EmailFotoLinkStrip, strip, "", true
 		case p.CompletedAt != nil && !now.Before(p.CompletedAt.Add(emailFotoQuiet)):
-			return EmailFotoStripOnly, strip, true
+			return EmailFotoStripOnly, strip, "", true
 		}
-		return "", nil, false
+		return "", nil, "", false
 	}
 
 	// Tanpa strip: aturan ini hanya untuk sesi yang berhenti di tengah jalan.
 	// Selama booth masih menampilkan sesi (heartbeat baru), strip masih bisa
 	// datang.
 	if p.LastSeenAt != nil && now.Before(p.LastSeenAt.Add(emailFotoBoothActive)) {
-		return "", nil, false
+		return "", nil, "", false
 	}
 	// Lalu tunggu sampai 10 menit tanpa foto baru, dihitung dari registrasi
 	// kalau belum ada foto sama sekali.
@@ -435,19 +440,24 @@ func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, stri
 		SELECT COUNT(*), MAX(created_at) FROM photos WHERE session_id = ? AND type = 'raw'`, p.SessionID,
 	).Scan(&raws, &lastRaw); err != nil {
 		log.Printf("⚠️  email foto: gagal baca foto (%s): %v", p.SessionID, err)
-		return "", nil, false
+		return "", nil, "", false
 	}
 	last := p.RegisteredAt
 	if lastRaw != nil && (last == nil || lastRaw.After(*last)) {
 		last = lastRaw
 	}
 	if last != nil && now.Before(last.Add(emailFotoQuiet)) {
-		return "", nil, false
+		return "", nil, "", false
 	}
-	if raws > 0 && link {
-		return EmailFotoLinkOnly, nil, true
+	switch {
+	case raws == 0:
+		return "", nil, reasonNoPhotos, true
+	case !driveOn:
+		return "", nil, reasonNoDrive, true
+	case !link:
+		return "", nil, reasonNoDriveLink, true
 	}
-	return "", nil, true
+	return EmailFotoLinkOnly, nil, "", true
 }
 
 // emailFotoStrip strip final terbaru sebagai lampiran, nil kalau belum ada.
@@ -480,13 +490,25 @@ func imageContentType(ext string) string {
 	return mime.TypeByExtension(ext)
 }
 
-// emailFotoBoothName nama booth dari brand label admin, atau nama bawaan.
+// emailFotoBoothName nama booth di subjek dan isi Email Foto serta pesan
+// WhatsApp: brand label admin, atau nama bawaan.
 func emailFotoBoothName() string {
 	stored, _ := readAppSettings("brand_label")
 	if name := strings.TrimSpace(stored["brand_label"]); name != "" {
 		return name
 	}
 	return defaultBoothName
+}
+
+// emailFotoSenderName nama pengirim Email Foto: SMTP_FROM_NAME kalau diisi,
+// selain itu nama booth (brand label admin, atau nama bawaan).
+func emailFotoSenderName(booth string) string {
+	if config.App != nil {
+		if name := strings.TrimSpace(config.App.SMTPFromName); name != "" {
+			return name
+		}
+	}
+	return booth
 }
 
 var (
@@ -558,7 +580,7 @@ func emailFotoMessage(booth string, p pendingEmailFoto, content string, now time
 
 	return mailer.Message{
 		To:       mailer.Address{Email: p.Recipient, Name: p.Name},
-		FromName: booth,
+		FromName: emailFotoSenderName(booth),
 		Subject:  fmt.Sprintf("Foto kamu dari %s 📸", booth),
 		Text:     text.String(),
 		HTML:     htm.String(),

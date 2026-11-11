@@ -34,7 +34,7 @@ test('print quantity follows the new mode', () => {
 });
 
 test('turning registration on or off counts as a change the booth must pick up', () => {
-  expect(modeChanged({ freeMode: true, registration: false }, { freeMode: true, registration: true })).toBe(true);
-  expect(modeChanged({ freeMode: true, registration: true }, { freeMode: true, registration: true })).toBe(false);
-  expect(modeChanged({ freeMode: false }, { freeMode: false, registration: false })).toBe(false);
+  expect(modeChanged({ freeMode: true, registrationScreen: false }, { freeMode: true, registrationScreen: true })).toBe(true);
+  expect(modeChanged({ freeMode: true, registrationScreen: true }, { freeMode: true, registrationScreen: true })).toBe(false);
+  expect(modeChanged({ freeMode: false }, { freeMode: false, registrationScreen: false })).toBe(false);
 });

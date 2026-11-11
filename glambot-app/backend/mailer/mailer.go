@@ -93,6 +93,19 @@ func Use(m Mailer) (restore func()) {
 
 var addressRe = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
+// MaxAddressLen panjang maksimum alamat email (batas SMTP). Booth memakai
+// batas yang sama (REGISTRATION_LIMITS di @photobooth/shared).
+const MaxAddressLen = 254
+
+// NormalizeAddress merapikan alamat email pelanggan (spasi di tepi dibuang,
+// huruf kecil) lalu memeriksanya: ok=true kalau tidak lebih dari
+// MaxAddressLen dan lolos ValidAddress. Dipakai registrasi, Kirim ulang
+// admin, dan ResendEmailFoto supaya alamat yang sama selalu ditulis sama.
+func NormalizeAddress(s string) (addr string, ok bool) {
+	addr = strings.ToLower(strings.TrimSpace(s))
+	return addr, len(addr) <= MaxAddressLen && ValidAddress(addr)
+}
+
 // ValidAddress aturan validasi email booth: bagian lokal, '@', lalu domain
 // yang mengandung titik. Sama dengan validasi di layar registrasi booth.
 func ValidAddress(s string) bool {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { REGISTRATION_LIMITS } from '@photobooth/shared';
 import { useBooth } from '../store';
 import { openEmailChange, saveEmailChange } from '../flow';
 import { isValidEmail, suggestEmail } from '../email';
@@ -6,7 +7,7 @@ import { pressKey } from '../keyboard';
 import { OnScreenKeyboard } from './OnScreenKeyboard';
 import { Icon } from './basics';
 
-const MAX_EMAIL = 254;
+const MAX_EMAIL = REGISTRATION_LIMITS.email;
 
 /**
  * QR screen: "Foto juga dikirim ke <email>" plus Ubah email, which opens the registration

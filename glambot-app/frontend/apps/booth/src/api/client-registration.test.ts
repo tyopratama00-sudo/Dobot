@@ -105,7 +105,7 @@ test('submit sends the WhatsApp number to the backend and keeps the stored form'
   expect(s.registration).toEqual({ name: 'Rina', email: 'rina@gmail.com', whatsapp: '6281234567890' });
 });
 
-test('a rejected registration keeps the customer on the registration screen', async () => {
+test('a rejected registration keeps the pelanggan on the registration screen', async () => {
   booth({});
   const api = await paidSession(false);
   await api.command({ type: 'begin' });

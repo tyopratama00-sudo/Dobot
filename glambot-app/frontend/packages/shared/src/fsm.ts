@@ -14,7 +14,7 @@ export const SESSION_STATES = [
   'WAITING_PAYMENT',
   'PAYMENT_SUCCESS',
   'PAYMENT_FAILED',
-  /** Customer types name + email (Registrasi) before frame selection, when admin turned it on. */
+  /** Pelanggan types name + email (Registrasi) before frame selection, when admin turned it on. */
   'REGISTRATION',
   'READY',
   'ROBOT_MOVING',

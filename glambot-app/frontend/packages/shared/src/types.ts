@@ -126,8 +126,8 @@ export interface BoothConfig {
   freeDigitalOnly?: boolean;
   /** Explicit admin free/paid mode; independent of a package's price. */
   freeMode?: boolean;
-  /** Registrasi screen after payment: admin switch on and booth email configured. */
-  registration?: boolean;
+  /** Show the Registrasi screen after payment: admin switch on and booth email configured. */
+  registrationScreen?: boolean;
   environment: string;
 }
 
@@ -154,6 +154,12 @@ export interface ComponentHealth {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * Longest Registrasi name and email, as the backend enforces them (handlers
+ * maxRegistrationName, mailer.MaxAddressLen). Shared by this schema and the booth screens.
+ */
+export const REGISTRATION_LIMITS = { name: 80, email: 254 } as const;
+
 /** Commands the booth sends to POST /api/sessions/:id/commands */
 export const sessionCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('begin') }),
@@ -161,7 +167,7 @@ export const sessionCommandSchema = z.discriminatedUnion('type', [
    * Lanjut on the registration screen: save name + email (+ optional WhatsApp number as typed;
    * '' clears it, absent keeps the stored one), then frame selection.
    */
-  z.object({ type: z.literal('register'), name: z.string().min(1).max(80), email: z.string().min(3).max(254), whatsapp: z.string().max(40).optional() }),
+  z.object({ type: z.literal('register'), name: z.string().min(1).max(REGISTRATION_LIMITS.name), email: z.string().min(3).max(REGISTRATION_LIMITS.email), whatsapp: z.string().max(40).optional() }),
   /** Registration screen timed out: frame selection without a registration. */
   z.object({ type: z.literal('registration_timeout') }),
   z.object({ type: z.literal('move'), angle: z.number().int().min(0).max(19) }),

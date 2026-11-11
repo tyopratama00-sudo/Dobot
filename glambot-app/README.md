@@ -384,7 +384,9 @@ SMTP_APP_PASSWORD=
 # Opsional: default smtp.gmail.com port 587 (STARTTLS); port 465 = TLS langsung.
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-# Opsional: nama tampilan pengirim.
+# Opsional: nama pengirim Email Foto. Kosong = brand label di Pengaturan admin,
+# atau "Glambot Photo Booth". Subjek, isi email, dan pesan WhatsApp selalu
+# memakai brand label (atau "Glambot Photo Booth").
 SMTP_FROM_NAME=Glambot Photo Booth
 ```
 

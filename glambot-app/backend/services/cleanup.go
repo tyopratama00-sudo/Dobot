@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"photobooth/config"
 	"photobooth/database"
+	"photobooth/models"
 	"time"
 )
 
@@ -143,9 +144,10 @@ func cleanupSession(sessionID string) error {
 	// terkirim tidak akan pernah terkirim: fotonya baru saja dihapus.
 	if _, err := tx.Exec(`
 		UPDATE email_deliveries
-		SET status = 'failed', next_attempt_at = NULL, updated_at = NOW(),
-			last_error = CASE WHEN last_error = '' THEN 'sesi kedaluwarsa, foto sudah dihapus' ELSE last_error END
-		WHERE session_id = ? AND status = 'pending'`, sessionID); err != nil {
+		SET status = ?, next_attempt_at = NULL, updated_at = NOW(),
+			last_error = CASE WHEN last_error = '' THEN ? ELSE last_error END
+		WHERE session_id = ? AND status = ?`,
+		models.EmailFotoFailed, models.EmailFotoReasonPhotosGone, sessionID, models.EmailFotoPending); err != nil {
 		tx.Rollback()
 		return err
 	}

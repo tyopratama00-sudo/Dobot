@@ -1,5 +1,5 @@
 /**
- * Email rules shared by the registration screen and (later) the QR screen "Ubah email".
+ * Email rules shared by the registration screen and the QR screen "Ubah email".
  * Same rule as backend mailer.ValidAddress: a local part, '@', and a domain containing a dot.
  */
 import { isValidWhatsApp } from './whatsapp';

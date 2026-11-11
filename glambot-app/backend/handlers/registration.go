@@ -15,10 +15,9 @@ import (
 	"photobooth/models"
 )
 
-const (
-	maxRegistrationName  = 80
-	maxRegistrationEmail = 254
-)
+// maxRegistrationName batas panjang nama; booth memakai batas yang sama
+// (REGISTRATION_LIMITS di @photobooth/shared). Batas email: mailer.MaxAddressLen.
+const maxRegistrationName = 80
 
 // whatsappStrip membuang pemisah yang lazim diketik pada nomor telepon.
 var whatsappStrip = strings.NewReplacer(" ", "", "-", "", ".", "", "(", "", ")", "")
@@ -62,12 +61,12 @@ func SaveSessionRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.Join(strings.Fields(body.Name), " ")
-	email := strings.ToLower(strings.TrimSpace(body.Email))
+	email, emailOK := mailer.NormalizeAddress(body.Email)
 	if name == "" || len([]rune(name)) > maxRegistrationName {
 		respondError(w, http.StatusBadRequest, "Nama wajib diisi (maks 80 karakter)")
 		return
 	}
-	if len(email) > maxRegistrationEmail || !mailer.ValidAddress(email) {
+	if !emailOK {
 		respondError(w, http.StatusBadRequest, "Alamat email tidak valid")
 		return
 	}

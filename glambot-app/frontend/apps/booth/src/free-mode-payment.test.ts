@@ -167,10 +167,10 @@ test('failed check or a config that fell back to defaults changes nothing', asyn
 
 test('registration switched on in admin reaches a booth that is already open', async () => {
   set({ session: null } as never);
-  api.mode.mockResolvedValue({ freeMode: true, registration: true });
-  api.config.mockResolvedValue({ ...freeConfig, registration: true });
+  api.mode.mockResolvedValue({ freeMode: true, registrationScreen: true });
+  api.config.mockResolvedValue({ ...freeConfig, registrationScreen: true });
 
   await syncMode();
 
-  expect(get().config).toMatchObject({ freeMode: true, registration: true });
+  expect(get().config).toMatchObject({ freeMode: true, registrationScreen: true });
 });

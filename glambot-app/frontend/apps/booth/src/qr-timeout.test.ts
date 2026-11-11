@@ -1,13 +1,9 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
-const { api, ApiError } = vi.hoisted(() => {
-  class ApiError extends Error {
-    constructor(public status: number, public code: string, message: string) {
-      super(message);
-    }
-  }
+import { MockApiError as ApiError } from './api-error.mock';
+
+const { api } = vi.hoisted(() => {
   return {
-    ApiError,
     api: {
       sessionId: 's1',
       command: vi.fn(),
@@ -19,9 +15,9 @@ const { api, ApiError } = vi.hoisted(() => {
   };
 });
 
-vi.mock('./api/client', () => ({
+vi.mock('./api/client', async () => ({
   api,
-  ApiError,
+  ApiError: (await import('./api-error.mock')).MockApiError,
   NetworkError: class extends Error {},
   newRequestId: () => 'req',
   onConnectivity: () => () => undefined,

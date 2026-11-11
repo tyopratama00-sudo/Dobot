@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"photobooth/mailer"
@@ -62,8 +61,8 @@ func AdminResendEmailFoto(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "Body tidak valid")
 		return
 	}
-	email := strings.ToLower(strings.TrimSpace(body.Email))
-	if email != "" && (len(email) > maxRegistrationEmail || !mailer.ValidAddress(email)) {
+	email, ok := mailer.NormalizeAddress(body.Email)
+	if email != "" && !ok {
 		respondError(w, http.StatusBadRequest, "Alamat email tidak valid")
 		return
 	}

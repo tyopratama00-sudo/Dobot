@@ -1,13 +1,9 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
-const { api, ApiError } = vi.hoisted(() => {
-  class ApiError extends Error {
-    constructor(public status: number, public code: string, message: string, public userMessage?: string) {
-      super(message);
-    }
-  }
+import { MockApiError as ApiError } from './api-error.mock';
+
+const { api } = vi.hoisted(() => {
   return {
-    ApiError,
     api: {
       sessionId: 's1',
       command: vi.fn(),
@@ -19,9 +15,9 @@ const { api, ApiError } = vi.hoisted(() => {
   };
 });
 
-vi.mock('./api/client', () => ({
+vi.mock('./api/client', async () => ({
   api,
-  ApiError,
+  ApiError: (await import('./api-error.mock')).MockApiError,
   NetworkError: class extends Error {},
   newRequestId: () => 'req',
   onConnectivity: () => () => undefined,
@@ -70,7 +66,7 @@ test('Lanjut sends the optional WhatsApp number with the registration', async ()
   expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '0812-3456-7890' }, expect.anything());
 });
 
-test('a rejected registration stays on the screen and tells the customer why', async () => {
+test('a rejected registration stays on the screen and tells the pelanggan why', async () => {
   api.command.mockRejectedValueOnce(new ApiError(400, 'HTTP_400', 'Alamat email tidak valid', 'Alamat email tidak valid'));
 
   submitRegistration('Rina', 'rina@x', '');

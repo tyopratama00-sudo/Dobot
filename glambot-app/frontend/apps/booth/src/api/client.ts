@@ -219,7 +219,7 @@ class Api {
   /** Admin-set per-session values (GET /api/config), copied into each new session plan. */
   private plan = { readySeconds: DEFAULT_SETTINGS.session.readySeconds, retakeLimit: 2 };
   /** Admin "Registrasi pelanggan" (GET /api/config): `begin` goes to REGISTRATION instead of FRAME_SELECTION. */
-  private registrationOn = false;
+  private registrationScreen = false;
   private listeners = new Set<(s: SessionSnapshot) => void>();
   private poll: ReturnType<typeof setInterval> | undefined;
   private paySeq = 0;
@@ -288,7 +288,7 @@ class Api {
     const { digicamUrl: _a, gphoto2Bin: _b, captureCommand: _c, previewUrl: _d, ...camera } = d.camera;
     const s = appConfig.session ?? {};
     this.plan = { readySeconds: s.readySeconds ?? d.session.readySeconds, retakeLimit: s.retakeLimit ?? 2 };
-    this.registrationOn = appConfig.registrationEnabled === true;
+    this.registrationScreen = appConfig.registrationEnabled === true;
     return {
       pricing: { ...d.pricing, firstPrint: this.pkg.price + this.pkg.print_unit_price, additionalPrint: this.pkg.print_unit_price, maxQuantity: s.maxQuantity ?? d.pricing.maxQuantity },
       session: { ...d.session, shotsPerAngle: 1, ...this.plan },
@@ -305,15 +305,15 @@ class Api {
       voucherChip: appConfig.voucherChipEnabled !== false,
       voucherChipCode: appConfig.voucherChipCode || 'FREE FOTO',
       freeDigitalOnly: appConfig.freeDigitalOnly === true,
-      registration: this.registrationOn,
+      registrationScreen: this.registrationScreen,
       environment: 'production',
     };
   }
 
   /** Just the admin switches the booth must follow live: cheap enough to poll, unlike config(). */
-  async mode(): Promise<{ freeMode: boolean; freeDigitalOnly: boolean; registration: boolean }> {
+  async mode(): Promise<{ freeMode: boolean; freeDigitalOnly: boolean; registrationScreen: boolean }> {
     const c = await go<AppConfig>('GET', '/api/config');
-    return { freeMode: c.freeMode === true, freeDigitalOnly: c.freeDigitalOnly === true, registration: c.registrationEnabled === true };
+    return { freeMode: c.freeMode === true, freeDigitalOnly: c.freeDigitalOnly === true, registrationScreen: c.registrationEnabled === true };
   }
 
   async health() {
@@ -597,7 +597,7 @@ class Api {
       case 'begin':
         // Paid: pick the frame first; its slot ratio drives the capture preview.
         if (st !== 'PAYMENT_SUCCESS') return st === 'REGISTRATION' || st === 'FRAME_SELECTION' || st === 'READY' ? s : invalid(st, cmd.type);
-        return this.emit({ status: this.registrationOn ? 'REGISTRATION' : 'FRAME_SELECTION' });
+        return this.emit({ status: this.registrationScreen ? 'REGISTRATION' : 'FRAME_SELECTION' });
       case 'register': {
         if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
         const registration = await this.saveRegistration(cmd.name, cmd.email, cmd.whatsapp);

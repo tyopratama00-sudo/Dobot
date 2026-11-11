@@ -327,6 +327,21 @@ func TestEmailFotoUsesTheBrandLabelAsBoothName(t *testing.T) {
 	}
 }
 
+func TestEmailFotoSenderNameComesFromSMTPFromName(t *testing.T) {
+	fake := emailFotoEnv(t)
+	config.App.SMTPFromName = "  Glambot Jakarta  "
+	readySession(t)
+	if err := upsertAppSettings(map[string]string{"brand_label": "Studio Ceria"}); err != nil {
+		t.Fatal(err)
+	}
+	RunEmailFotoDispatch(t0.Add(6 * time.Minute))
+	sent := fake.Sent()
+	// Nama pengirim dari SMTP_FROM_NAME; subjek dan isi tetap memakai nama booth.
+	if len(sent) != 1 || sent[0].FromName != "Glambot Jakarta" || sent[0].Subject != "Foto kamu dari Studio Ceria 📸" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}
+
 func TestEmailFotoEmailChangedWhilePendingGoesToTheNewAddress(t *testing.T) {
 	fake := emailFotoEnv(t)
 	id := readySession(t)
@@ -408,7 +423,21 @@ func TestEmailFotoSkippedWhenRawPhotosHaveNoLink(t *testing.T) {
 	addPhoto(t, id, "raw", t0.Add(2*time.Minute))
 
 	RunEmailFotoDispatch(t0.Add(12 * time.Minute))
-	if d := delivery(t, id); d.Status != "skipped" || d.LastError != "tidak ada foto" || len(fake.Sent()) != 0 {
+	want := "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif"
+	if d := delivery(t, id); d.Status != "skipped" || d.LastError != want || len(fake.Sent()) != 0 {
+		t.Fatalf("delivery = %+v, sent %d", d, len(fake.Sent()))
+	}
+}
+
+func TestEmailFotoSkippedWhenRawPhotosHaveNoDriveFolder(t *testing.T) {
+	fake := emailFotoEnv(t)
+	enableDrive(t)
+	id := emailFotoSession(t) // Drive aktif, tapi folder sesi tidak pernah dibuat
+	addPhoto(t, id, "raw", t0.Add(2*time.Minute))
+
+	RunEmailFotoDispatch(t0.Add(12 * time.Minute))
+	want := "tidak ada yang bisa dikirim: strip belum jadi dan link Drive tidak tersedia"
+	if d := delivery(t, id); d.Status != "skipped" || d.LastError != want || len(fake.Sent()) != 0 {
 		t.Fatalf("delivery = %+v, sent %d", d, len(fake.Sent()))
 	}
 }
