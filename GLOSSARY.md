@@ -12,6 +12,10 @@ _Avoid_: Member, user, akun
 Nama dan email yang wajib diisi pelanggan untuk satu sesi, ditambah nomor WhatsApp yang boleh dikosongkan, sebagai jalur cadangan pengiriman foto dan catatan kunjungan. Bukan pembuatan akun, dan registrasi dari sesi berbeda tidak digabung walau emailnya sama.
 _Avoid_: Akun, pendaftaran akun, sign up, data member
 
+**Saran Email**:
+Alamat pengganti yang ditawarkan booth saat domain email di registrasi kemungkinan salah ketik dari domain umum (misalnya `gmial.com` → `gmail.com`). Hanya tawaran: pelanggan boleh memakainya, memperbaiki sendiri, atau tetap memakai alamat yang diketik.
+_Avoid_: Koreksi otomatis, validasi email
+
 **Email Foto**:
 Email yang dikirim ke alamat di registrasi setelah foto sesi siap, berisi link folder foto dan strip foto final. Dikirim ke setiap registrasi, sudah atau belum scan QR.
 _Avoid_: Notifikasi, newsletter, email promo

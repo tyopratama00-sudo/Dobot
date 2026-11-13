@@ -131,3 +131,32 @@ func TestRestartKeepsPriceOfPackageOutsideBackup(t *testing.T) {
 		t.Fatalf("price of package outside backup = %d, want 50000", base)
 	}
 }
+
+func regTypoDesc(t *testing.T) string {
+	t.Helper()
+	var desc string
+	if err := DB.QueryRow(`SELECT trigger_desc FROM audio_scripts WHERE id = 'reg_typo'`).Scan(&desc); err != nil {
+		t.Fatal(err)
+	}
+	return desc
+}
+
+// Booth lama masih menyimpan keterangan reg_typo sebelum pop up konfirmasi Saran Email.
+func TestRestartUpdatesOldRegTypoDescription(t *testing.T) {
+	freshDB(t)
+	exec(t, `UPDATE audio_scripts SET trigger_desc = 'Email kemungkinan salah ketik, muncul saran domain' WHERE id = 'reg_typo'`)
+	restart(t)
+	want := "Tekan Lanjut dengan email yang kemungkinan salah ketik: muncul pop up konfirmasi Saran Email"
+	if got := regTypoDesc(t); got != want {
+		t.Fatalf("reg_typo trigger_desc = %q, want %q", got, want)
+	}
+}
+
+func TestRestartKeepsAdminRegTypoDescription(t *testing.T) {
+	freshDB(t)
+	exec(t, `UPDATE audio_scripts SET trigger_desc = 'Ditulis admin' WHERE id = 'reg_typo'`)
+	restart(t)
+	if got := regTypoDesc(t); got != "Ditulis admin" {
+		t.Fatalf("restart overwrote admin reg_typo trigger_desc: %q", got)
+	}
+}

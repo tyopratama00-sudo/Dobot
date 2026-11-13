@@ -13,6 +13,11 @@ type audioSeed struct {
 
 var poseKeys = []string{"wave", "grin", "peace", "lean", "shock", "cheek", "cool", "thumbs", "hug", "laugh", "model", "pout", "heart", "point", "arms", "peek", "serious", "fav", "hop", "free"}
 
+const (
+	regTypoWhen    = "Tekan Lanjut dengan email yang kemungkinan salah ketik: muncul pop up konfirmasi Saran Email"
+	regTypoOldWhen = "Email kemungkinan salah ketik, muncul saran domain"
+)
+
 // audioSeeds = clip yang dipanggil kode booth (voice(...)). Naskah sengaja
 // kosong: diisi admin. Ubah daftar ini kalau menambah/menghapus pemicu di booth.
 func audioSeeds() []audioSeed {
@@ -30,7 +35,7 @@ func audioSeeds() []audioSeed {
 		{"pay_free", "pay_free", "Masuk halaman bayar Mode Gratis", 6},
 
 		{"reg_show", "register", "Masuk halaman registrasi (isi nama dan email)", 6},
-		{"reg_typo", "register", "Email kemungkinan salah ketik, muncul saran domain", 4},
+		{"reg_typo", "register", regTypoWhen, 4},
 
 		{"pay_mode", "package", "Masuk halaman pilih paket", 6},
 		{"pay_qty", "package", "Setelah pay_mode, menjelaskan jumlah cetak", 6},
@@ -113,7 +118,8 @@ func audioSeeds() []audioSeed {
 }
 
 // seedAudioScripts: id/tab/urutan/sumber mengikuti kode; naskah, nada, durasi,
-// dan keterangan pemicu yang sudah diedit admin tidak ditimpa.
+// dan keterangan pemicu yang sudah diedit admin tidak ditimpa (keterangan bawaan
+// lama yang belum diedit boleh diganti, lihat reg_typo di bawah).
 func seedAudioScripts(db *DBWrapper) error {
 	for i, a := range audioSeeds() {
 		source := "booth"
@@ -128,5 +134,9 @@ func seedAudioScripts(db *DBWrapper) error {
 			return err
 		}
 	}
-	return nil
+	// Keterangan reg_typo berubah saat clip pindah ke pop up konfirmasi Saran Email;
+	// ganti hanya yang masih berisi teks lama, supaya editan admin tetap.
+	_, err := db.Exec(`UPDATE audio_scripts SET trigger_desc = ? WHERE id = 'reg_typo' AND trigger_desc = ?`,
+		regTypoWhen, regTypoOldWhen)
+	return err
 }

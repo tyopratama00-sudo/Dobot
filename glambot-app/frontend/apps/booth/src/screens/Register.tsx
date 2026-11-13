@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { REGISTRATION_LIMITS } from '@photobooth/shared';
 import { useBooth } from '../store';
 import { backFromPay, submitRegistration } from '../flow';
@@ -11,8 +11,6 @@ import { Icon } from '../components/basics';
 
 type Field = 'name' | 'email' | 'whatsapp';
 const MAX: Record<Field, number> = { ...REGISTRATION_LIMITS, whatsapp: 24 };
-/** The typo voice waits for a pause in typing, so "gmail.c" on the way to "gmail.com" stays quiet. */
-const TYPO_VOICE_MS = 1500;
 
 /**
  * Registrasi: name + email (+ optional WhatsApp number) typed on the on-screen keyboard,
@@ -29,16 +27,28 @@ export function Registration() {
   const validEmail = isValidEmail(email);
   const badWhatsApp = !isValidWhatsApp(values.whatsapp);
   const suggestion = suggestEmail(email);
-  // Robot mentions a likely typo once per visit, after the pelanggan stops typing.
-  const typoSpoken = useRef(false);
-  useEffect(() => {
-    if (!suggestion || typoSpoken.current) return;
-    const t = setTimeout(() => {
-      typoSpoken.current = true;
-      voice('reg_typo');
-    }, TYPO_VOICE_MS);
-    return () => clearTimeout(t);
-  }, [suggestion]);
+  // Lanjut with a Saran Email asks first; only the three dialog buttons close it.
+  const [confirming, setConfirming] = useState(false);
+  const submit = (withEmail: string) => submitRegistration(values.name.trim(), withEmail, values.whatsapp.trim());
+  const onNext = () => {
+    if (!suggestion) return submit(email);
+    setConfirming(true);
+    voice('reg_typo');
+  };
+  const useSuggestion = () => {
+    if (!suggestion) return;
+    setConfirming(false);
+    setValues((v) => ({ ...v, email: suggestion }));
+    submit(suggestion);
+  };
+  const editEmail = () => {
+    setConfirming(false);
+    select('email');
+  };
+  const keepEmail = () => {
+    setConfirming(false);
+    submit(email);
+  };
 
   const select = (f: Field) => {
     setField(f);
@@ -78,7 +88,7 @@ export function Registration() {
         <button
           className={`btn pr reg-next ${busy === 'register' ? 'wait' : ''}`}
           disabled={!ready || !!busy}
-          onClick={() => submitRegistration(values.name.trim(), values.email.trim(), values.whatsapp.trim())}
+          onClick={onNext}
           data-testid="reg-next"
           data-avoid
         >
@@ -117,6 +127,27 @@ export function Registration() {
         </p>
       </div>
       <OnScreenKeyboard shift={shift} onKey={onKey} disabled={busy === 'register'} label={field === 'name' ? 'Keyboard nama' : field === 'email' ? 'Keyboard email' : 'Keyboard nomor WhatsApp'} />
+      {confirming && suggestion ? (
+        <div className="qr-email-dialog" role="dialog" aria-modal="true" aria-label="Konfirmasi email" data-testid="reg-typo-dialog">
+          <div className="qr-email-panel reg-typo-panel">
+            <h2>Emailnya sudah benar?</h2>
+            <p className="reg-typo-text">
+              Kamu menulis <b>{email}</b>. Maksudmu <b>{suggestion}</b>?
+            </p>
+            <div className="reg-typo-actions">
+              <button type="button" className="btn pr" onClick={useSuggestion} data-testid="reg-typo-use" data-avoid>
+                Pakai {suggestion}
+              </button>
+              <button type="button" className="btn sm" onClick={editEmail} data-testid="reg-typo-edit" data-avoid>
+                Ubah email
+              </button>
+              <button type="button" className="btn sm" onClick={keepEmail} data-testid="reg-typo-keep" data-avoid>
+                Tetap pakai {email}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
