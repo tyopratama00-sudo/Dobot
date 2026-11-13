@@ -1936,6 +1936,12 @@ img {
   gap: 18px;
   padding: 56px 80px 32px;
 }
+.reg-back {
+  position: absolute;
+  top: 28px;
+  left: 32px;
+  z-index: 2;
+}
 .reg-head {
   text-align: center;
 }

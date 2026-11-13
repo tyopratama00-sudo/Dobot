@@ -72,7 +72,7 @@ export function ErrorScreen() {
   const clientError = useBooth((s) => s.clientError);
   const resetAfter = useBooth((s) => s.config?.timeouts.errorResetSeconds ?? 90);
   const [canReset, setCanReset] = useState(false);
-  const unpaid = !session || UNPAID_STATES.has(session.status);
+  const unpaid = !session || session.status === 'REGISTRATION' || UNPAID_STATES.has(session.status);
   const noPhotos = clientError?.code === 'NO_PHOTOS';
   // Session-level failure (e.g. saving the frame) carries its own customer message.
   const sessionFailed = session?.status === 'ERROR';

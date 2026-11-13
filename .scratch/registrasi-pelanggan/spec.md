@@ -12,7 +12,7 @@ Pemilik booth juga tidak punya catatan siapa saja yang berkunjung. Halaman admin
 
 ## Solution
 
-Setelah pembayaran berhasil (atau setelah menekan MULAI FOTO di mode gratis), pelanggan mengisi **Registrasi**: nama dan email, lewat keyboard di layar. Registrasi ini bukan pembuatan akun. Data dipakai untuk mengirim **Email Foto**, yang berisi link folder foto dan strip foto final, ke setiap pelanggan yang registrasi, sudah atau belum memindai QR. Email ini menjadi jalur cadangan kalau pelanggan lupa memindai.
+Setelah menekan MULAI dan sebelum memilih paket, pelanggan mengisi **Registrasi** (diubah 2026-11-13; sebelumnya setelah pembayaran): nama dan email, lewat keyboard di layar. Registrasi ini bukan pembuatan akun. Data dipakai untuk mengirim **Email Foto**, yang berisi link folder foto dan strip foto final, ke setiap pelanggan yang registrasi, sudah atau belum memindai QR. Email ini menjadi jalur cadangan kalau pelanggan lupa memindai.
 
 Admin bisa melihat dan mencari registrasi di halaman Sesi, memantau status Email Foto, mengirim ulang ke alamat yang diperbaiki, dan menghapus data registrasi atas permintaan pelanggan. Fitur ini bisa dinyalakan atau dimatikan dari Pengaturan, dan hanya bisa dinyalakan kalau akun Gmail booth sudah diatur.
 
@@ -102,11 +102,12 @@ Admin bisa melihat dan mencari registrasi di halaman Sesi, memantau status Email
 
 ### Booth flow
 
-- A new session state **REGISTRATION** is added to the shared session state machine, with its own screen. It sits between PAYMENT_SUCCESS and FRAME_SELECTION:
-  - **Registration on:** after the paid ticket is shown, the flow enters REGISTRATION.
-  - **Registration off:** the flow goes straight to frame selection as today.
-  - **Submit:** saves the registration and moves on.
-  - **Timeout:** moves on to frame selection without a registration, so no Email Foto is sent. This is a new timeout action, alongside the existing per-screen actions.
+- A new session state **REGISTRATION** is added to the shared session state machine, with its own screen. Since 2026-11-13 it sits between MULAI (IDLE) and the package screen (SELECT_PRINT), before anything is paid:
+  - **Registration on:** pressing MULAI opens REGISTRATION.
+  - **Registration off:** MULAI goes straight to the package screen as before.
+  - **Submit (Lanjut):** moves on to the package screen. The booth keeps the registration (also across a reload) and saves it on the backend session once that session is paid, before frame selection. The backend still only accepts a registration on a paid session.
+  - **Save after payment fails:** a refusal (400/403/404/410) drops it; a network or server failure is retried with the booth heartbeat. The paid session never waits on it.
+  - **Timeout or Kembali:** ends the visit and returns to the welcome screen, like the unpaid package screen. Nothing is saved.
 - Restoring a saved booth session that was in REGISTRATION returns to the registration screen.
 - The registration screen shows the explanation text: email is only used to send this session's photos, as a backup if the customer forgets to scan the QR, and is kept as a visit record. Pressing Lanjut counts as agreement; there is no checkbox.
 - Email validation and typo suggestions are a pure module shared by the registration screen and the QR "Ubah email" dialog:

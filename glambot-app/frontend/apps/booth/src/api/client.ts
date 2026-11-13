@@ -198,6 +198,7 @@ function frameToTemplate(f: GoFrame): PhotoTemplate {
 const STORE_KEY = 'pb.glambot';
 const PAID_FAIL = new Set(['failed', 'expired', 'cancel', 'deny']);
 const UNPAID: SessionState[] = ['SELECT_PRINT', 'WAITING_PAYMENT', 'PAYMENT_FAILED'];
+type PendingRegistration = { name: string; email: string; whatsapp: string };
 const BACK: Partial<Record<SessionState, SessionState>> = {
   PHOTO_SELECTION: 'REVIEW',
   EDITING: 'PHOTO_SELECTION',
@@ -220,8 +221,14 @@ class Api {
   private packageDurationSecs = 600;
   /** Admin-set per-session values (GET /api/config), copied into each new session plan. */
   private plan = { readySeconds: DEFAULT_SETTINGS.session.readySeconds, retakeLimit: 2 };
-  /** Admin "Registrasi pelanggan" (GET /api/config): `begin` goes to REGISTRATION instead of FRAME_SELECTION. */
+  /** Admin "Registrasi pelanggan" (GET /api/config): a new session opens on REGISTRATION instead of SELECT_PRINT. */
   private registrationScreen = false;
+  /**
+   * Registrasi typed before the package. The backend only takes it on a paid session (and a
+   * new Go session is made per payment attempt), so it waits here until the session is paid.
+   */
+  private pendingRegistration: PendingRegistration | null = null;
+  private flushing = false;
   private listeners = new Set<(s: SessionSnapshot) => void>();
   private poll: ReturnType<typeof setInterval> | undefined;
   private paySeq = 0;
@@ -232,17 +239,20 @@ class Api {
 
   constructor() {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null') as { snap: SessionSnapshot; goId: string | null; orderId: string | null } | null;
+      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null') as { snap: SessionSnapshot; goId: string | null; orderId: string | null; pendingRegistration?: PendingRegistration | null } | null;
       if (saved?.snap) {
         const st = saved.snap.status;
         // Restart mid-flow: capture re-observes the robot, a half-done render is redone.
         // A cut-off retake returns to Review (its chance is already spent).
-        const status: SessionState = st === 'RETAKE' || st === 'SESSION_COMPLETE' ? 'REVIEW' : CAPTURE_STATES.has(st) ? 'READY' : ['RENDERING', 'PRINTING'].includes(st) ? 'FINAL_PREVIEW' : st;
+        // A paid REGISTRATION was saved by the booth before registration moved ahead of the
+        // package: that customer already paid, so carry on from the paid ticket.
+        const status: SessionState = st === 'REGISTRATION' && saved.snap.paidAt ? 'PAYMENT_SUCCESS' : st === 'RETAKE' || st === 'SESSION_COMPLETE' ? 'REVIEW' : CAPTURE_STATES.has(st) ? 'READY' : ['RENDERING', 'PRINTING'].includes(st) ? 'FINAL_PREVIEW' : st;
         this.snap = { ...saved.snap, status };
         this.sessionId = saved.snap.id;
         this.token = 'local';
         this.goId = saved.goId;
         this.orderId = saved.orderId;
+        this.pendingRegistration = saved.pendingRegistration ?? null;
         if (status === 'WAITING_PAYMENT') this.startPoll();
         if (st === 'RETAKE') void go('POST', '/api/robot/disable').catch(() => undefined);
       }
@@ -255,7 +265,7 @@ class Api {
     if (!this.snap) return this.snap!;
     this.snap = { ...this.snap, ...patch, version: this.snap.version + 1, updatedAt: new Date().toISOString() };
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ snap: this.snap, goId: this.goId, orderId: this.orderId }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ snap: this.snap, goId: this.goId, orderId: this.orderId, pendingRegistration: this.pendingRegistration }));
     } catch {
       /* ignore */
     }
@@ -340,6 +350,8 @@ class Api {
    */
   async heartbeat(_body: unknown): Promise<{ ok: boolean; cameraFault: 'capture' | 'disconnect' | null }> {
     if (this.goId && this.snap && !isTerminal(this.snap.status)) await go('POST', `/api/session/${this.goId}/heartbeat`, undefined, undefined, 5000).catch(() => undefined);
+    // A Registrasi that could not be saved right after payment (backend unreachable) is retried here.
+    await this.flushRegistration();
     return { ok: true, cameraFault: null };
   }
 
@@ -353,7 +365,7 @@ class Api {
     this.snap = {
       id: this.sessionId,
       code: '',
-      status: 'SELECT_PRINT',
+      status: this.registrationScreen ? 'REGISTRATION' : 'SELECT_PRINT',
       quantity: 1,
       amount: 0,
       templateId: null,
@@ -528,14 +540,40 @@ class Api {
    * Also used to change the email later in the session (QR screen): without `whatsapp`
    * the backend keeps the stored number; '' clears it.
    */
-  async saveRegistration(name: string, email: string, whatsapp?: string): Promise<RegistrationDTO> {
+  async saveRegistration(name: string, email: string, whatsapp?: string, timeoutMs?: number): Promise<RegistrationDTO> {
     if (!this.goId) throw new ApiError(404, 'NOT_FOUND', 'Sesi glambot tidak ditemukan', 'Sesi tidak ditemukan.');
     const body = whatsapp === undefined ? { name, email } : { name, email, whatsapp };
-    const r = await go<{ name: string; email: string; whatsapp?: string }>('PUT', `/api/session/${this.goId}/registration`, body);
+    const r = await go<{ name: string; email: string; whatsapp?: string }>('PUT', `/api/session/${this.goId}/registration`, body, undefined, timeoutMs);
     const registration: RegistrationDTO = { name: r?.name ?? name, email: r?.email ?? email };
     if (typeof r?.whatsapp === 'string') registration.whatsapp = r.whatsapp;
-    if (this.snap && this.st !== 'REGISTRATION') this.emit({ registration });
+    if (this.snap) this.emit({ registration });
     return registration;
+  }
+
+  /**
+   * Save the Registrasi typed before the package, once this session is paid. A refusal the
+   * pelanggan cannot fix any more (invalid data, session ended, data deleted) drops it; a
+   * network or server failure keeps it for the next heartbeat. Never throws: a paid session
+   * goes on with or without it.
+   */
+  private async flushRegistration() {
+    const reg = this.pendingRegistration;
+    // One save at a time: the begin after payment and a heartbeat can both get here.
+    if (!reg || this.flushing || !this.goId || !this.snap || !this.snap.paidAt || isTerminal(this.snap.status)) return;
+    this.flushing = true;
+    try {
+      // Short timeout: the paid customer waits on this before frame selection; the heartbeat retries.
+      await this.saveRegistration(reg.name, reg.email, reg.whatsapp, 5000);
+      if (this.pendingRegistration === reg) this.pendingRegistration = null;
+    } catch (e) {
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 409) {
+        console.warn('[booth] registration dropped:', e.message);
+        if (this.pendingRegistration === reg) this.pendingRegistration = null;
+      } else return;
+    } finally {
+      this.flushing = false;
+    }
+    if (this.snap) this.emit({});
   }
 
   async uploadPhoto(..._args: unknown[]): Promise<SessionSnapshot> {
@@ -598,18 +636,16 @@ class Api {
     switch (cmd.type) {
       case 'begin':
         // Paid: pick the frame first; its slot ratio drives the capture preview.
-        if (st !== 'PAYMENT_SUCCESS') return st === 'REGISTRATION' || st === 'FRAME_SELECTION' || st === 'READY' ? s : invalid(st, cmd.type);
-        return this.emit({ status: this.registrationScreen ? 'REGISTRATION' : 'FRAME_SELECTION' });
-      case 'register': {
-        if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
-        const registration = await this.saveRegistration(cmd.name, cmd.email, cmd.whatsapp);
-        // Timed out while the request was in flight: saveRegistration already recorded it.
-        if (this.st !== 'REGISTRATION') return this.snap!;
-        return this.emit({ status: 'FRAME_SELECTION', registration });
-      }
-      case 'registration_timeout':
-        if (st !== 'REGISTRATION') return st === 'FRAME_SELECTION' ? s : invalid(st, cmd.type);
+        if (st !== 'PAYMENT_SUCCESS') return st === 'FRAME_SELECTION' || st === 'READY' ? s : invalid(st, cmd.type);
+        // Now paid: the Registrasi typed before the package goes on this backend session.
+        await this.flushRegistration();
+        if (this.st !== 'PAYMENT_SUCCESS') return this.snap!;
         return this.emit({ status: 'FRAME_SELECTION' });
+      case 'register':
+        // Before the package nothing is paid, so it is only kept here (see pendingRegistration).
+        if (st !== 'REGISTRATION') return st === 'SELECT_PRINT' ? s : invalid(st, cmd.type);
+        this.pendingRegistration = { name: cmd.name, email: cmd.email, whatsapp: cmd.whatsapp ?? '' };
+        return this.emit({ status: 'SELECT_PRINT' });
       case 'frame':
         if (st !== 'FRAME_SELECTION') return st === 'READY' ? s : invalid(st, cmd.type);
         if (this.goId) {
@@ -685,7 +721,8 @@ class Api {
         localStorage.removeItem(STORE_KEY);
         return this.emit({ status: 'FINISHED' });
       case 'cancel':
-        if (!UNPAID.includes(st)) return s;
+        if (!UNPAID.includes(st) && st !== 'REGISTRATION') return s;
+        this.pendingRegistration = null;
         this.stopPoll();
         this.paySeq++;
         this.expireGo();
@@ -775,6 +812,7 @@ class Api {
     this.sessionId = null;
     this.goId = null;
     this.orderId = null;
+    this.pendingRegistration = null;
     this.snap = null;
     try {
       localStorage.removeItem(STORE_KEY);

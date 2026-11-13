@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { REGISTRATION_LIMITS } from '@photobooth/shared';
 import { useBooth } from '../store';
-import { submitRegistration } from '../flow';
+import { backFromPay, submitRegistration } from '../flow';
 import { canSubmitRegistration, isValidEmail, suggestEmail } from '../email';
 import { isValidWhatsApp } from '../whatsapp';
 import { voice } from '../voice';
@@ -16,7 +16,7 @@ const TYPO_VOICE_MS = 1500;
 
 /**
  * Registrasi: name + email (+ optional WhatsApp number) typed on the on-screen keyboard,
- * between the paid ticket and frame selection. No skip button.
+ * right after MULAI, before the package is chosen. No skip button; Kembali ends the visit (nothing paid yet).
  */
 export function Registration() {
   const busy = useBooth((s) => s.busy);
@@ -63,6 +63,10 @@ export function Registration() {
 
   return (
     <div className="scr en booth-theme reg-screen">
+      <button className={`btn sm reg-back ${busy === 'cancel' ? 'wait' : ''}`} onClick={backFromPay} disabled={!!busy} data-testid="reg-back" data-avoid>
+        <Icon n="back" z={30} />
+        Kembali
+      </button>
       <div className="reg-head">
         <h1>Kirim foto ke email kamu</h1>
         <p className="p">Isi nama dan email, lalu tekan Lanjut.</p>

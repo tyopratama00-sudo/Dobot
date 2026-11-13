@@ -534,7 +534,8 @@ export function backFromPay() {
 /* ------------------------------------------------------------------ registration */
 
 /**
- * Lanjut on the registration screen. A rejection (e.g. invalid email) keeps the screen and shows why.
+ * Lanjut on the registration screen (before the package): the package screen comes next. The
+ * Registrasi is saved on the backend once the session is paid. A rejection keeps the screen and shows why.
  * The WhatsApp number is always sent ('' = none), so a second Lanjut also clears an old one.
  */
 export function submitRegistration(name: string, email: string, whatsapp: string) {
@@ -961,9 +962,9 @@ export function onIdleTimeout() {
   if (s.screenPreview) return;
   const st = s.session?.status;
   if (!st) return;
-  if (st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();
+  // Registrasi comes before the package: nothing is paid yet, so a timeout ends the visit too.
+  if (st === 'REGISTRATION' || st === 'SELECT_PRINT' || st === 'WAITING_PAYMENT' || st === 'PAYMENT_FAILED') return backFromPay();
   switch (timeoutAction(st)) {
-    case 'skip-registration': return void guard('auto', () => sendResilient({ type: 'registration_timeout' }));
     case 'choose-frame': return toFrames();
     case 'confirm-frame': return confirmTemplate();
     case 'auto-pick':

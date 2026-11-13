@@ -91,7 +91,10 @@ export interface SessionSnapshot {
   capture: { angle: number | null; shot: number | null; retakeAngle: number | null };
   print: PrintDTO | null;
   gallery: GalleryDTO | null;
-  /** Registrasi saved on the paid backend session; absent/null = none (switch off or timed out). */
+  /**
+   * Registrasi typed before the package. Kept on the booth until the session is paid, then saved
+   * on the paid backend session; absent/null = none (switch off).
+   */
   registration?: RegistrationDTO | null;
   version: number;
   updatedAt: string;
@@ -126,7 +129,7 @@ export interface BoothConfig {
   freeDigitalOnly?: boolean;
   /** Explicit admin free/paid mode; independent of a package's price. */
   freeMode?: boolean;
-  /** Show the Registrasi screen after payment: admin switch on and booth email configured. */
+  /** Show the Registrasi screen before the package: admin switch on and booth email configured. */
   registrationScreen?: boolean;
   environment: string;
 }
@@ -165,11 +168,9 @@ export const sessionCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('begin') }),
   /**
    * Lanjut on the registration screen: save name + email (+ optional WhatsApp number as typed;
-   * '' clears it, absent keeps the stored one), then frame selection.
+   * '' clears it, absent keeps the stored one), then the package screen. Saved on the backend once paid.
    */
   z.object({ type: z.literal('register'), name: z.string().min(1).max(REGISTRATION_LIMITS.name), email: z.string().min(3).max(REGISTRATION_LIMITS.email), whatsapp: z.string().max(40).optional() }),
-  /** Registration screen timed out: frame selection without a registration. */
-  z.object({ type: z.literal('registration_timeout') }),
   z.object({ type: z.literal('move'), angle: z.number().int().min(0).max(19) }),
   z.object({ type: z.literal('countdown'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),
   z.object({ type: z.literal('capture'), angle: z.number().int().min(0).max(19), shot: z.number().int().min(0).max(9) }),

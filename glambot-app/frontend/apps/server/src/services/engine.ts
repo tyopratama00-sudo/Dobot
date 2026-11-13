@@ -563,7 +563,6 @@ export class SessionEngine {
         return null;
       }
       case 'register':
-      case 'registration_timeout':
         // Registrasi lives in the Go backend booth flow only.
         this.requireState(s, []);
         return null;

@@ -35,11 +35,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.config.mockReturnValue(new Promise(() => undefined));
   api.health.mockReturnValue(new Promise(() => undefined));
-  // Like the booth adapter: REGISTRATION only leaves through register or the timeout.
+  // Like the booth adapter: REGISTRATION leaves through register (to the package) or cancel.
   api.command.mockImplementation(async (cmd: { type: string; name?: string; email?: string }) => {
     const st = get().session?.status;
-    if (st === 'REGISTRATION' && cmd.type === 'register') return snap('FRAME_SELECTION', 6, { registration: { name: cmd.name, email: cmd.email } });
-    if (st === 'REGISTRATION' && cmd.type === 'registration_timeout') return snap('FRAME_SELECTION', 6);
+    if (st === 'REGISTRATION' && cmd.type === 'register') return snap('SELECT_PRINT', 6);
+    if (st === 'REGISTRATION' && cmd.type === 'cancel') return snap('CANCELLED', 6);
     throw new ApiError(409, 'INVALID_TRANSITION', `${cmd.type} not allowed in ${st}`);
   });
   api.getSession.mockImplementation(async () => get().session);
@@ -50,19 +50,18 @@ test('a session in REGISTRATION shows the registration screen', () => {
   expect(currentScreen(get())).toBe('register');
 });
 
-test('Lanjut saves the registration and opens frame selection', async () => {
+test('Lanjut sends the registration and opens the package screen', async () => {
   submitRegistration('Rina', 'rina@gmail.com', '');
 
-  await vi.waitFor(() => expect(currentScreen(get())).toBe('tpl'));
+  await vi.waitFor(() => expect(currentScreen(get())).toBe('pay'));
   // No WhatsApp number typed: sent as '' so an earlier number is cleared, not kept.
   expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '' }, expect.anything());
-  expect(get().session?.registration).toEqual({ name: 'Rina', email: 'rina@gmail.com' });
 });
 
 test('Lanjut sends the optional WhatsApp number with the registration', async () => {
   submitRegistration('Rina', 'rina@gmail.com', '0812-3456-7890');
 
-  await vi.waitFor(() => expect(currentScreen(get())).toBe('tpl'));
+  await vi.waitFor(() => expect(currentScreen(get())).toBe('pay'));
   expect(api.command).toHaveBeenCalledWith({ type: 'register', name: 'Rina', email: 'rina@gmail.com', whatsapp: '0812-3456-7890' }, expect.anything());
 });
 
@@ -75,11 +74,10 @@ test('a rejected registration stays on the screen and tells the pelanggan why', 
   expect(currentScreen(get())).toBe('register');
 });
 
-test('registration timeout continues to frame selection without saving', async () => {
+test('registration timeout ends the unpaid visit and returns to welcome', async () => {
   onIdleTimeout();
 
-  await vi.waitFor(() => expect(currentScreen(get())).toBe('tpl'));
-  expect(api.command).toHaveBeenCalledWith({ type: 'registration_timeout' }, expect.anything());
+  await vi.waitFor(() => expect(currentScreen(get())).toBe('welcome'));
+  expect(api.command).toHaveBeenCalledWith({ type: 'cancel' }, expect.anything());
   expect(api.command).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'register' }), expect.anything());
-  expect(get().session?.registration ?? null).toBeNull();
 });

@@ -14,7 +14,7 @@ export const SESSION_STATES = [
   'WAITING_PAYMENT',
   'PAYMENT_SUCCESS',
   'PAYMENT_FAILED',
-  /** Pelanggan types name + email (Registrasi) before frame selection, when admin turned it on. */
+  /** Pelanggan types name + email (Registrasi) before choosing a package, when admin turned it on. */
   'REGISTRATION',
   'READY',
   'ROBOT_MOVING',
@@ -97,7 +97,10 @@ export type SessionEventType = (typeof SESSION_EVENTS)[number];
 type Table = { [S in SessionState]: Partial<Record<SessionEventType, SessionState>> };
 
 export const TRANSITIONS: Table = {
-  IDLE: { START: 'SELECT_PRINT' },
+  IDLE: { START: 'SELECT_PRINT', START_REGISTRATION: 'REGISTRATION' },
+  // Before the package, nothing paid yet. No skip button: submit goes on to the package,
+  // a timeout (or Kembali) ends the visit like an unpaid package screen.
+  REGISTRATION: { REGISTERED: 'SELECT_PRINT', CANCEL: 'CANCELLED', TIMEOUT: 'CANCELLED', EXPIRE: 'EXPIRED' },
   SELECT_PRINT: { PAYMENT_CREATED: 'WAITING_PAYMENT', CANCEL: 'CANCELLED', TIMEOUT: 'CANCELLED', EXPIRE: 'EXPIRED' },
   WAITING_PAYMENT: {
     PAYMENT_CREATED: 'WAITING_PAYMENT',
@@ -118,9 +121,7 @@ export const TRANSITIONS: Table = {
     TIMEOUT: 'CANCELLED',
     EXPIRE: 'EXPIRED',
   },
-  PAYMENT_SUCCESS: { BEGIN: 'READY', START_REGISTRATION: 'REGISTRATION' },
-  // No skip button: submit saves the registration, a timeout moves on without one.
-  REGISTRATION: { REGISTERED: 'FRAME_SELECTION', TIMEOUT: 'FRAME_SELECTION' },
+  PAYMENT_SUCCESS: { BEGIN: 'READY' },
   READY: { MOVE_ROBOT: 'ROBOT_MOVING' },
   ROBOT_MOVING: { ROBOT_ARRIVED: 'POSE_GUIDANCE' },
   POSE_GUIDANCE: { START_COUNTDOWN: 'COUNTDOWN' },
@@ -152,7 +153,7 @@ export const TRANSITIONS: Table = {
 const TERMINAL: ReadonlySet<SessionState> = new Set(['IDLE', 'FINISHED', 'RESETTING', 'CANCELLED', 'EXPIRED']);
 
 export const PAID_STATES: ReadonlySet<SessionState> = new Set([
-  'PAYMENT_SUCCESS', 'REGISTRATION', 'READY', 'ROBOT_MOVING', 'POSE_GUIDANCE', 'COUNTDOWN', 'CAPTURING', 'CAPTURE_SUCCESS',
+  'PAYMENT_SUCCESS', 'READY', 'ROBOT_MOVING', 'POSE_GUIDANCE', 'COUNTDOWN', 'CAPTURING', 'CAPTURE_SUCCESS',
   'ANGLE_COMPLETE', 'SESSION_COMPLETE', 'REVIEW', 'RETAKE', 'FRAME_SELECTION', 'PHOTO_SELECTION', 'EDITING',
   'FINAL_PREVIEW', 'RENDERING', 'PRINTING', 'PRINT_SUCCESS', 'PRINT_FAILED', 'GENERATING_GALLERY', 'QR_READY',
 ]);

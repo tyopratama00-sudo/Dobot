@@ -94,16 +94,18 @@ describe('session state machine', () => {
     expect(canTransition('GENERATING_GALLERY', 'GALLERY_READY')).toBe(true);
   });
 
-  it('puts registration between the paid ticket and frame selection', () => {
-    expect(transition('PAYMENT_SUCCESS', 'START_REGISTRATION')).toBe('REGISTRATION');
-    expect(transition('REGISTRATION', 'REGISTERED')).toBe('FRAME_SELECTION');
-    // Timeout continues the paid session without a registration.
-    expect(transition('REGISTRATION', 'TIMEOUT')).toBe('FRAME_SELECTION');
-    // No skip: nothing else leaves the registration screen, and it cannot be reached before payment.
-    expect(canTransition('REGISTRATION', 'CANCEL')).toBe(false);
+  it('puts registration between MULAI and the package', () => {
+    expect(transition('IDLE', 'START_REGISTRATION')).toBe('REGISTRATION');
+    expect(transition('REGISTRATION', 'REGISTERED')).toBe('SELECT_PRINT');
+    // Nothing is paid yet: a timeout or Kembali ends the visit.
+    expect(transition('REGISTRATION', 'TIMEOUT')).toBe('CANCELLED');
+    expect(transition('REGISTRATION', 'CANCEL')).toBe('CANCELLED');
+    // No skip to the package, and it cannot be reached once the payment flow started.
     expect(canTransition('REGISTRATION', 'BACK')).toBe(false);
+    expect(canTransition('REGISTRATION', 'PAYMENT_CREATED')).toBe(false);
+    expect(canTransition('PAYMENT_SUCCESS', 'START_REGISTRATION')).toBe(false);
     expect(canTransition('WAITING_PAYMENT', 'START_REGISTRATION')).toBe(false);
-    expect(isPaid('REGISTRATION')).toBe(true);
+    expect(isPaid('REGISTRATION')).toBe(false);
     expect(screenForState('REGISTRATION')).toBe('register');
   });
 
