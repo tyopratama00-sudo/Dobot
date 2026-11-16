@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "audio-transcribe",
+  "owner": "maxgent-ai",
+  "repo": "maxgent-plugin",
+  "path": "skills/audio-transcribe",
+  "branch": "main",
+  "sha": "2016ee658009b6ed405842d46c62266e4f02eed9",
+  "source": "manual"
+}
