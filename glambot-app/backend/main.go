@@ -62,6 +62,7 @@ func main() {
 	// ─── 5. Jalankan job background (cleanup + penyusul upload Drive) ─────────
 	services.StartCleanupJob()
 	handlers.StartDriveRetryJob()
+	handlers.StartR2RetryJob()
 	handlers.StartPaymentReconcileJob()
 	handlers.StartEmailFotoJob()
 

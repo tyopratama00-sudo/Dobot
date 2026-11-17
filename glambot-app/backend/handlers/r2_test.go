@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"photobooth/config"
 	"photobooth/database"
 	"photobooth/models"
+	"photobooth/services"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -32,15 +35,25 @@ type r2Object struct {
 type fakeR2 struct {
 	mu      sync.Mutex
 	objects map[string]r2Object
+	history map[string][]r2Object // semua versi yang pernah diunggah per key
+	down    bool                  // true: presign menjawab 503 seperti layanan yang mati
 	srv     *httptest.Server
 }
 
 func startFakeR2(t *testing.T) *fakeR2 {
 	t.Helper()
-	g := &fakeR2{objects: map[string]r2Object{}}
+	g := &fakeR2{objects: map[string]r2Object{}, history: map[string][]r2Object{}}
 	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/uploads/presign":
+			g.mu.Lock()
+			down := g.down
+			g.mu.Unlock()
+			if down {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte(`{"error":"r2_not_configured"}`))
+				return
+			}
 			if r.Header.Get("Authorization") != "Bearer tok-rahasia" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
@@ -70,7 +83,9 @@ func startFakeR2(t *testing.T) *fakeR2 {
 				return
 			}
 			g.mu.Lock()
-			g.objects[strings.TrimPrefix(r.URL.Path, "/put/")] = r2Object{r.Header.Get("Content-Type"), buf.Bytes()}
+			key, obj := strings.TrimPrefix(r.URL.Path, "/put/"), r2Object{r.Header.Get("Content-Type"), buf.Bytes()}
+			g.objects[key] = obj
+			g.history[key] = append(g.history[key], obj)
 			g.mu.Unlock()
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -239,14 +254,38 @@ func TestComposedStripMakesTheQRPointToTheResultPage(t *testing.T) {
 	}
 }
 
+// resultPageHTML Halaman Hasil sesi versi terakhir, setelah semua upload selesai.
 func resultPageHTML(t *testing.T, g *fakeR2, sessionID string) string {
 	t.Helper()
 	waitQRReady(t, sessionID)
+	backgroundUploads.Wait()
 	o, ok := g.object("sessions/" + sessionID + "/index.html")
 	if !ok {
 		t.Fatal("index.html belum diunggah")
 	}
 	return string(o.body)
+}
+
+// firstResultPageHTML versi Halaman Hasil yang pertama kali diunggah (yang
+// dilihat pelanggan begitu QR siap, sebelum GIF selesai).
+func firstResultPageHTML(t *testing.T, g *fakeR2, sessionID string) string {
+	t.Helper()
+	waitQRReady(t, sessionID)
+	o, ok := g.firstVersion("sessions/" + sessionID + "/index.html")
+	if !ok {
+		t.Fatal("index.html belum diunggah")
+	}
+	return string(o.body)
+}
+
+// firstVersion versi pertama yang pernah diunggah untuk key.
+func (g *fakeR2) firstVersion(key string) (r2Object, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if v := g.history[key]; len(v) > 0 {
+		return v[0], true
+	}
+	return r2Object{}, false
 }
 
 func TestFirstResultPageShowsStripUploadedPhotosAndGIFNote(t *testing.T) {
@@ -264,7 +303,7 @@ func TestFirstResultPageShowsStripUploadedPhotosAndGIFNote(t *testing.T) {
 	backgroundUploads.Wait() // penanda foto-2 terunggah sudah tersimpan
 
 	composeStrip(t, id, []string{f1, f2}, []byte("JPEG strip"))
-	page := resultPageHTML(t, g, id)
+	page := firstResultPageHTML(t, g, id)
 
 	for _, want := range []string{
 		`lang="id"`,
@@ -328,4 +367,167 @@ func TestPhotosCapturedAtTheSameInstantGetDistinctNumbers(t *testing.T) {
 
 	g.waitObject(t, "sessions/"+id+"/foto-1.jpg")
 	g.waitObject(t, "sessions/"+id+"/foto-2.jpg")
+}
+
+func (g *fakeR2) setDown(down bool) {
+	g.mu.Lock()
+	g.down = down
+	g.mu.Unlock()
+}
+
+// fakeGIFs menaruh kedua GIF sesi seolah generator sudah selesai.
+func fakeGIFs(t *testing.T, sessionID string) {
+	t.Helper()
+	for path, body := range map[string]string{
+		services.AnimationOutputPath(sessionID): "GIF slideshow",
+		services.LiveStripOutputPath(sessionID): "GIF live",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func r2Synced(t *testing.T, sessionID string) bool {
+	t.Helper()
+	var synced bool
+	if err := database.DB.QueryRow(`SELECT r2_synced FROM sessions WHERE id = ?`, sessionID).Scan(&synced); err != nil {
+		t.Fatal(err)
+	}
+	return synced
+}
+
+func TestFinishedGIFsCompleteTheResultPage(t *testing.T) {
+	g := r2Env(t)
+	id := paidSession(t)
+	foto := capturePhoto(t, id, []byte("JPEG satu"))
+	fakeGIFs(t, id)
+
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip"))
+	backgroundUploads.Wait()
+
+	for key, want := range map[string]string{
+		"sessions/" + id + "/slideshow.gif":  "GIF slideshow",
+		"sessions/" + id + "/live-strip.gif": "GIF live",
+	} {
+		if o, _ := g.object(key); string(o.body) != want || o.contentType != "image/gif" {
+			t.Errorf("%s: isi %q, tipe %q", key, o.body, o.contentType)
+		}
+	}
+	page := resultPageHTML(t, g, id)
+	for _, want := range []string{`href="slideshow.gif" download`, `href="live-strip.gif" download`, `href="foto-1.jpg" download`, `href="strip.jpg" download`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("halaman akhir tidak memuat %q", want)
+		}
+	}
+	if strings.Contains(page, "GIF sedang disiapkan") {
+		t.Error("halaman akhir masih menyebut GIF sedang disiapkan")
+	}
+	if !r2Synced(t, id) {
+		t.Error("sesi belum ditandai tersinkron ke R2")
+	}
+}
+
+func TestRetryJobCompletesASessionAfterTheGatewayComesBack(t *testing.T) {
+	g := r2Env(t)
+	id := paidSession(t)
+	g.setDown(true)
+	foto := capturePhoto(t, id, []byte("JPEG satu"))
+	fakeGIFs(t, id)
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip"))
+	backgroundUploads.Wait()
+	if l := resultLink(t, id); l.Ready || r2Synced(t, id) {
+		t.Fatalf("gateway mati tapi link = %+v, tersinkron = %v", l, r2Synced(t, id))
+	}
+
+	g.setDown(false)
+	mustExec(t, `UPDATE sessions SET completed_at = NOW() - INTERVAL '2 minutes' WHERE id = ?`, id)
+	retryPendingR2Sessions()
+
+	page := resultPageHTML(t, g, id)
+	for _, want := range []string{`href="strip.jpg" download`, `href="foto-1.jpg" download`, `href="slideshow.gif" download`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("halaman tidak memuat %q", want)
+		}
+	}
+	if !r2Synced(t, id) {
+		t.Error("sesi belum ditandai tersinkron setelah retry")
+	}
+}
+
+func TestRetryJobSkipsFreshAndExpiredSessions(t *testing.T) {
+	g := r2Env(t)
+	g.setDown(true)
+	fresh, expired := paidSession(t), paidSession(t)
+	for _, id := range []string{fresh, expired} {
+		composeStrip(t, id, nil, []byte("JPEG strip"))
+	}
+	backgroundUploads.Wait()
+	g.setDown(false)
+	mustExec(t, `UPDATE sessions SET completed_at = NOW() - INTERVAL '2 minutes', expires_at = NOW() - INTERVAL '1 minute' WHERE id = ?`, expired)
+
+	retryPendingR2Sessions()
+
+	for _, id := range []string{fresh, expired} {
+		if _, ok := g.object("sessions/" + id + "/strip.jpg"); ok {
+			t.Errorf("sesi %s ikut diunggah retry job", id)
+		}
+	}
+}
+
+func TestRecomposeReplacesTheStripAndNeedsANewSync(t *testing.T) {
+	g := r2Env(t)
+	id := paidSession(t)
+	foto := capturePhoto(t, id, []byte("JPEG satu"))
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip lama"))
+	backgroundUploads.Wait()
+	if !r2Synced(t, id) {
+		t.Fatal("compose pertama belum tersinkron")
+	}
+
+	// Compose ulang saat layanan sedang mati: versi baru belum naik, jadi sesi
+	// harus kembali masuk antrean retry job.
+	g.setDown(true)
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip baru"))
+	backgroundUploads.Wait()
+	if r2Synced(t, id) {
+		t.Fatal("compose ulang tidak mereset penanda sinkron R2")
+	}
+
+	g.setDown(false)
+	mustExec(t, `UPDATE sessions SET completed_at = NOW() - INTERVAL '2 minutes' WHERE id = ?`, id)
+	retryPendingR2Sessions()
+	if o, _ := g.object("sessions/" + id + "/strip.jpg"); string(o.body) != "JPEG strip baru" {
+		t.Errorf("strip di R2 = %q, mau versi baru", o.body)
+	}
+	if !r2Synced(t, id) {
+		t.Error("versi baru belum tersinkron setelah retry")
+	}
+}
+
+// Finalisasi milik compose A yang baru mendapat giliran setelah compose B
+// tersimpan tidak boleh menandai sesi tersinkron: GIF dan strip yang ia kirim
+// bisa jadi milik A, jadi versi B harus tetap disusulkan retry job.
+func TestFinalizeOfAnOlderComposeDoesNotMarkTheSessionSynced(t *testing.T) {
+	r2Env(t)
+	id := paidSession(t)
+	foto := capturePhoto(t, id, []byte("JPEG satu"))
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip A"))
+	backgroundUploads.Wait()
+
+	var composeA sql.NullTime
+	if err := database.DB.QueryRow(`SELECT completed_at FROM sessions WHERE id = ?`, id).Scan(&composeA); err != nil {
+		t.Fatal(err)
+	}
+	// Compose B tersimpan (completed_at baru, penanda sinkron direset).
+	mustExec(t, `UPDATE sessions SET completed_at = completed_at + INTERVAL '1 second', r2_synced = FALSE WHERE id = ?`, id)
+
+	finalizeSessionToR2(id, composeA)
+
+	if r2Synced(t, id) {
+		t.Error("finalisasi compose lama menandai sesi tersinkron")
+	}
 }

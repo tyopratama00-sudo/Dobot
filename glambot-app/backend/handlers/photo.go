@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -371,13 +372,16 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update sesi: frame_id + filter strip + assignment slot + status completed.
-	// completed_at diisi di sini (sebelumnya kolomnya tidak pernah ditulis).
-	if _, err := database.DB.Exec(
-		// drive_synced di-reset: strip & GIF versi baru belum tentu sudah naik ke
-		// Drive, jadi sesi ini harus kembali masuk radar retry job sampai lengkap.
-		`UPDATE sessions SET frame_id = ?, strip_filter = ?, slot_photo_ids = ?, slot_transforms = ?, status = 'completed', completed_at = NOW(), drive_synced = FALSE WHERE id = ?`,
+	// completed_at diisi di sini (sebelumnya kolomnya tidak pernah ditulis), dan
+	// nilainya dibawa ke finalisasi R2 sebagai penanda "compose yang ini".
+	var composedAt sql.NullTime
+	if err := database.DB.QueryRow(
+		// drive_synced & r2_synced di-reset: strip & GIF versi baru belum tentu
+		// sudah naik ke Drive/R2, jadi sesi ini harus kembali masuk radar retry
+		// job sampai lengkap.
+		`UPDATE sessions SET frame_id = ?, strip_filter = ?, slot_photo_ids = ?, slot_transforms = ?, status = 'completed', completed_at = NOW(), drive_synced = FALSE, r2_synced = FALSE WHERE id = ? RETURNING completed_at`,
 		frameID, stripFilter, string(slotPhotoIDsJSON), slotTransformsJSON, sessionID,
-	); err != nil {
+	).Scan(&composedAt); err != nil {
 		respondError(w, http.StatusInternalServerError, "Gagal memperbarui sesi")
 		return
 	}
@@ -401,7 +405,7 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 	// sekarang juga (non-blocking), tidak usah antre di belakang encoding GIF
 	// di bawah. Finalize memakai nama file yang sama, jadi tidak akan dobel.
 	EnqueueFramedStripUpload(sessionID, framedFullPath)
-	EnqueueFramedStripUploadR2(sessionID)
+	firstResultPage := EnqueueFramedStripUploadR2(sessionID)
 
 	// Pre-generate kedua varian GIF di background supaya saat user buka
 	// halaman download di HP, file sudah siap (tidak perlu wait beberapa
@@ -440,6 +444,8 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 		// supaya QR di halaman download bisa mengarah ke folder publik (no-op
 		// kalau Drive belum dikonfigurasi).
 		UploadSessionToDrive(sid)
+		<-firstResultPage
+		finalizeSessionToR2(sid, composedAt)
 	})
 
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]interface{}{
