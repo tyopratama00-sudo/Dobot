@@ -11,12 +11,18 @@ Spec: `.scratch/upload-r2/spec.md`. Glossary: Halaman Hasil.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di aed16b5
 
-- [ ] Dengan R2 aktif, foto raw yang di-capture sampai ke gateway sebagai `foto-N` dengan content type yang benar, dan fotonya ditandai terunggah ke R2.
-- [ ] Setelah compose, strip dan `index.html` sampai ke gateway, dan endpoint link QR menjawab `ready: true` dengan URL publik `index.html`.
-- [ ] `index.html` versi awal memuat strip, tombol unduh untuk foto yang sudah terunggah saja, catatan GIF sedang disiapkan, brand label, dan tidak memuat `<script>` atau `<form>`.
-- [ ] Endpoint link QR: sesi tanpa link R2 tapi punya link Drive menjawab link Drive; R2 dan Drive mati menjawab `enabled: false`.
-- [ ] Dengan R2 aktif, tidak ada upload Drive walaupun kredensial Drive terisi.
-- [ ] Dengan `R2_UPLOAD_ENABLED=false`, perilaku Drive tidak berubah.
-- [ ] Migrasi: sesi yang sudah ada dianggap tersinkron ke R2, sesi baru belum.
+- [x] Dengan R2 aktif, foto raw yang di-capture sampai ke gateway sebagai `foto-N` dengan content type yang benar, dan fotonya ditandai terunggah ke R2.
+- [x] Setelah compose, strip dan `index.html` sampai ke gateway, dan endpoint link QR menjawab `ready: true` dengan URL publik `index.html`.
+- [x] `index.html` versi awal memuat strip, tombol unduh untuk foto yang sudah terunggah saja, catatan GIF sedang disiapkan, brand label, dan tidak memuat `<script>` atau `<form>`.
+- [x] Endpoint link QR: sesi tanpa link R2 tapi punya link Drive menjawab link Drive; R2 dan Drive mati menjawab `enabled: false`.
+- [x] Dengan R2 aktif, tidak ada upload Drive walaupun kredensial Drive terisi.
+- [x] Dengan `R2_UPLOAD_ENABLED=false`, perilaku Drive tidak berubah.
+- [x] Migrasi: sesi yang sudah ada dianggap tersinkron ke R2, sesi baru belum.
+
+## Comments
+
+- Kriteria "tidak ada upload Drive selama R2 aktif" dijaga lewat `driveUploadsActive()` di semua titik upload Drive dan retry job Drive. Tidak ada tes otomatis: tanpa Google sungguhan tes itu akan selalu lolos.
+- Hasil review: race compose ulang (kunci per sesi, strip terbaru dibaca ulang) dan nomor `foto-N` untuk foto dengan `created_at` kembar sudah diperbaiki.
+- Jangan rilis tanpa tiket 02: upload strip/halaman yang gagal baru dicoba ulang oleh retry job di tiket 02.
