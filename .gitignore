@@ -21,3 +21,6 @@ logs/
 
 # customer session photos
 glambot-app/backend/storage/sessions/
+
+# file upload dari mock gateway (development)
+mock-uploads/
