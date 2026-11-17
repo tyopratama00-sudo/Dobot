@@ -119,6 +119,7 @@ func recordCanonCapture(sessionID string) (*models.Photo, error) {
 	// Streaming ke Drive: kirim foto full-res ini segera (non-blocking) supaya
 	// tidak menumpuk jadi satu batch besar di akhir sesi. filePath = path absolut.
 	EnqueueRawPhotoUpload(sessionID, photoID, filePath)
+	EnqueueRawPhotoUploadR2(sessionID, photoID, filePath)
 
 	return &models.Photo{
 		ID:        photoID,

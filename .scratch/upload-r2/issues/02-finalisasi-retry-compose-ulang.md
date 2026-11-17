@@ -1,0 +1,16 @@
+# 02: Finalisasi, retry job, dan compose ulang
+
+**What to build:** Setelah GIF selesai, GIF (slideshow dan live strip) serta foto raw yang belum terunggah dikirim ke R2, lalu Halaman Hasil versi akhir (tanpa catatan GIF sedang disiapkan, dengan GIF dan tombol unduhnya). Sesi ditandai tersinkron ke R2 hanya kalau semua file berhasil dan sesi tidak di-compose ulang selama upload berlangsung. Retry job tiap menit menyusulkan sesi selesai yang belum tersinkron (umur lebih dari 90 detik, belum kedaluwarsa, maksimal 3 per putaran). Compose ulang mereset penanda sinkron R2, dan strip baru menimpa strip lama.
+
+Spec: `.scratch/upload-r2/spec.md`.
+
+**Blocked by:** 01 (Upload R2 sampai QR siap)
+
+**Status:** ready-for-agent
+
+- [ ] Finalisasi mengunggah `slideshow.gif`, `live-strip.gif` (`image/gif`), foto yang tertinggal, dan `index.html` versi akhir, lalu sesi ditandai tersinkron ke R2.
+- [ ] `index.html` versi akhir menampilkan GIF dan tombol unduhnya, dan tidak lagi memuat catatan GIF sedang disiapkan.
+- [ ] Kalau satu upload gagal, sesi tidak ditandai tersinkron; retry job menyelesaikannya setelah gateway pulih.
+- [ ] Compose ulang selama finalisasi berjalan tidak membuat sesi ditandai tersinkron.
+- [ ] Compose ulang mereset penanda sinkron R2.
+- [ ] Retry job hanya mengambil sesi yang memenuhi syarat umur, kedaluwarsa, dan batas per putaran.

@@ -157,6 +157,14 @@ func applyCompatibilityMigrations(db *DBWrapper) error {
 		// Penanda foto raw yang sudah naik ke Drive (upload streaming per-capture)
 		// — cegah dobel-upload, finalize tinggal kirim sisanya.
 		`ALTER TABLE photos ADD COLUMN IF NOT EXISTS drive_uploaded BOOLEAN NOT NULL DEFAULT FALSE`,
+		// Cloudflare R2 (lewat layanan pay.photorobot.id): link Halaman Hasil sesi,
+		// penanda semua artefak sudah naik, dan penanda per foto raw. Sama seperti
+		// drive_synced, r2_synced dibuat TRUE dulu lalu default-nya diturunkan ke
+		// FALSE: sesi lama tidak diunggah ulang saat R2 pertama kali dinyalakan.
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS r2_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS r2_synced BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE sessions ALTER COLUMN r2_synced SET DEFAULT FALSE`,
+		`ALTER TABLE photos ADD COLUMN IF NOT EXISTS r2_uploaded BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_url TEXT`,
 		`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS qris_raw_string TEXT`,
 		`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`,

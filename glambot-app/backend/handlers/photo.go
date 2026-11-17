@@ -117,6 +117,7 @@ func UploadPhoto(w http.ResponseWriter, r *http.Request) {
 	// Streaming ke Drive: kirim foto ini segera (non-blocking), sama seperti
 	// jalur auto-capture robot — tidak menunggu akhir sesi.
 	EnqueueRawPhotoUpload(sessionID, photoID, filePath)
+	EnqueueRawPhotoUploadR2(sessionID, photoID, filePath)
 
 	photo := models.Photo{
 		ID:        photoID,
@@ -400,6 +401,7 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 	// sekarang juga (non-blocking), tidak usah antre di belakang encoding GIF
 	// di bawah. Finalize memakai nama file yang sama, jadi tidak akan dobel.
 	EnqueueFramedStripUpload(sessionID, framedFullPath)
+	EnqueueFramedStripUploadR2(sessionID)
 
 	// Pre-generate kedua varian GIF di background supaya saat user buka
 	// halaman download di HP, file sudah siap (tidak perlu wait beberapa
@@ -409,7 +411,8 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 	// per-artefak tidak lagi saling menunggu. Ini penting karena layar QR
 	// menahan loading sampai GIF live selesai — dulu ia harus menunggu
 	// slideshow kelar dulu padahal tidak memerlukannya sama sekali.
-	go func(sid string) {
+	sid := sessionID
+	goBackground(func() {
 		var wg sync.WaitGroup
 		wg.Add(2)
 
@@ -437,7 +440,7 @@ func ComposeFrame(w http.ResponseWriter, r *http.Request) {
 		// supaya QR di halaman download bisa mengarah ke folder publik (no-op
 		// kalau Drive belum dikonfigurasi).
 		UploadSessionToDrive(sid)
-	}(sessionID)
+	})
 
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]interface{}{
 		"result_id":     resultID,
