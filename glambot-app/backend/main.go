@@ -43,7 +43,9 @@ func main() {
 	handlers.EnsureDefaultAdmin()
 
 	// ─── 4. Init Midtrans ─────────────────────────────────────────────────────
-	if config.App.MidtransServerKey == "" {
+	if services.PaymentGatewayEnabled() {
+		log.Printf("💳 Pembayaran lewat gateway: %s", config.App.PaymentGatewayURL)
+	} else if config.App.MidtransServerKey == "" {
 		log.Println("⚠️  MIDTRANS_SERVER_KEY belum diset, fitur pembayaran tidak aktif")
 	} else {
 		services.InitMidtrans()
@@ -60,6 +62,8 @@ func main() {
 	// ─── 5. Jalankan job background (cleanup + penyusul upload Drive) ─────────
 	services.StartCleanupJob()
 	handlers.StartDriveRetryJob()
+	handlers.StartR2RetryJob()
+	handlers.StartPaymentReconcileJob()
 	handlers.StartEmailFotoJob()
 
 	// ─── 6. Setup router ──────────────────────────────────────────────────────

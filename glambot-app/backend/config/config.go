@@ -54,6 +54,13 @@ type Config struct {
 	SMTPHost        string
 	SMTPPort        int
 	SMTPFromName    string // nama tampilan pengirim (opsional)
+
+	// Layanan pembayaran & upload milik owner (pay.photorobot.id). Kalau URL
+	// terisi, QRIS lewat layanan ini dan MIDTRANS_SERVER_KEY tidak dipakai.
+	// Token hanya dibaca dari .env — jangan ditulis ke log atau frontend.
+	PaymentGatewayURL   string
+	PaymentGatewayToken string
+	R2UploadEnabled     bool
 }
 
 var App *Config
@@ -90,6 +97,9 @@ func Load() {
 		SMTPHost:             getEnv("SMTP_HOST", "smtp.gmail.com"),
 		SMTPPort:             getEnvInt("SMTP_PORT", 587),
 		SMTPFromName:         getEnv("SMTP_FROM_NAME", ""),
+		PaymentGatewayURL:    getEnv("PAYMENT_GATEWAY_URL", ""),
+		PaymentGatewayToken:  getEnv("PAYMENT_GATEWAY_TOKEN", ""),
+		R2UploadEnabled:      getEnv("R2_UPLOAD_ENABLED", "false") == "true",
 	}
 
 	// Hardening: tolak start di production kalau secret/password masih default.

@@ -498,6 +498,14 @@ class Api {
     const pay = this.snap!.payment!;
     if (Date.parse(pay.expiresAt) < Date.now()) {
       this.stopPoll();
+      // Tanpa webhook: kesempatan terakhir menangkap bayar di detik-detik akhir.
+      const last = await go<{ status: string; paid: boolean }>('GET', `/api/payment/status/${encodeURIComponent(orderId)}`).catch(() => null);
+      if (orderId !== this.orderId || this.st !== 'WAITING_PAYMENT') return;
+      if (last?.paid || last?.status === 'paid') {
+        const now = new Date().toISOString();
+        this.emit({ status: 'PAYMENT_SUCCESS', paidAt: now, payment: { ...pay, status: 'PAID', paidAt: now } });
+        return;
+      }
       this.emit({ status: 'PAYMENT_FAILED', payment: { ...pay, status: 'EXPIRED' } });
       return;
     }

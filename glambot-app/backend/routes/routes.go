@@ -88,7 +88,7 @@ func Setup(storagePath string) http.Handler {
 			r.Get("/session/{sessionID}/gif", handlers.DownloadSessionGIF)
 			r.Get("/session/{sessionID}/gif-live", handlers.DownloadSessionLiveGIF)
 			r.Get("/session/{sessionID}/gif-live/available", handlers.GetSessionLiveGIFAvailable)
-			r.Get("/session/{sessionID}/drive", handlers.GetSessionDriveLink)
+			r.Get("/session/{sessionID}/drive", handlers.GetSessionResultLink)
 			r.Get("/download/{photoID}", handlers.DownloadPhoto)
 		})
 

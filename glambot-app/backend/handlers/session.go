@@ -202,6 +202,11 @@ func UpdateSessionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pelanggan meninggalkan layar bayar: tutup QR-nya di Midtrans juga.
+	if body.Status == models.StatusExpired && session.Status == models.StatusPendingPayment {
+		go expirePendingPayments(sessionID)
+	}
+
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]string{
 		"session_id": sessionID,
 		"status":     string(body.Status),

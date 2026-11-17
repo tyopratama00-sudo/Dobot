@@ -206,11 +206,11 @@ func TestWhatsAppLinkNeedsANumber(t *testing.T) {
 	}
 }
 
-func TestWhatsAppLinkNeedsTheDriveFolder(t *testing.T) {
+func TestWhatsAppLinkNeedsAResultPage(t *testing.T) {
 	isolatedDB(t)
 	id := whatsappSession(t, "Rina", "081234567890")
 	if got := whatsappDetail(t, id); got.WhatsApp != "6281234567890" || got.WhatsAppLink != nil ||
-		got.Reason != "Link foto belum tersedia (Google Drive)" {
+		got.Reason != "Link Halaman Hasil belum tersedia" {
 		t.Fatalf("detail = %+v", got)
 	}
 }

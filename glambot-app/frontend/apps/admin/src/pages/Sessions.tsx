@@ -12,7 +12,8 @@ interface Sess {
   status: string;
   frame: string;
   photos: number;
-  drive_url: string;
+  /** Link Halaman Hasil sesi: halaman R2, atau folder Drive untuk sesi lama. */
+  result_url: string;
   created_at: string;
   completed_at?: string;
   registration_name: string;
@@ -289,7 +290,7 @@ function SessionDetail({ id }: { id: string }) {
                   ['Jumlah cetak', s.print_count],
                   ['Mulai', dt(s.created_at)],
                   ['Selesai', dt(s.completed_at)],
-                  ['Google Drive', s.drive_url ? <a href={s.drive_url} target="_blank" rel="noreferrer">Buka folder ↗</a> : '—'],
+                  ['Halaman Hasil', s.result_url ? <a href={s.result_url} target="_blank" rel="noreferrer">Buka ↗</a> : '—'],
                 ] as const
               ).map(([k, v]) => (
                 <tr key={k}>

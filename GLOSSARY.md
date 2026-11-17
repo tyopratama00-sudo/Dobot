@@ -17,5 +17,9 @@ Alamat pengganti yang ditawarkan booth saat domain email di registrasi kemungkin
 _Avoid_: Koreksi otomatis, validasi email
 
 **Email Foto**:
-Email yang dikirim ke alamat di registrasi setelah foto sesi siap, berisi link folder foto dan strip foto final. Dikirim ke setiap registrasi, sudah atau belum scan QR.
+Email yang dikirim ke alamat di registrasi setelah foto sesi siap, berisi link Halaman Hasil dan strip foto final. Dikirim ke setiap registrasi, sudah atau belum scan QR.
 _Avoid_: Notifikasi, newsletter, email promo
+
+**Halaman Hasil**:
+Halaman tempat pelanggan melihat dan mengunduh strip, GIF, dan foto sesinya; satu per sesi, dituju oleh QR di booth, Email Foto, dan pesan WhatsApp.
+_Avoid_: Folder Drive, link Drive, link download, halaman download

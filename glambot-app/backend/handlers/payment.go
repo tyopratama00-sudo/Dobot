@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"photobooth/config"
 	"photobooth/database"
@@ -158,7 +159,9 @@ func CreatePayment(w http.ResponseWriter, r *http.Request) {
 	// Buat QRIS di Midtrans dengan harga FINAL (setelah diskon)
 	qrisResult, err := services.CreateQRISPayment(orderID, session.FinalPrice, session.ID)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "Gagal membuat pembayaran: "+err.Error())
+		// Detail (alamat layanan, kode error) hanya ke log, bukan ke layar pelanggan.
+		log.Printf("create payment %s gagal: %v", orderID, err)
+		respondError(w, http.StatusInternalServerError, "Gagal membuat pembayaran. Coba lagi.")
 		return
 	}
 
@@ -548,4 +551,103 @@ func createOrGetFreePaidTransaction(session *models.Session) (*models.Transactio
 	// Robot enable dipindah ke frontend (tombol "Got it, Let's Go!").
 
 	return &existing, nil
+}
+
+// ─── Pengganti webhook ───────────────────────────────────────────────────────
+
+// paymentProviderActive true kalau ada penyedia QRIS yang bisa ditanya
+// (gateway owner, atau Midtrans langsung cara lama).
+func paymentProviderActive() bool {
+	return services.PaymentGatewayEnabled() || (config.App != nil && config.App.MidtransServerKey != "")
+}
+
+// StartPaymentReconcileJob: akun Midtrans utama tidak mengirim notifikasi ke
+// booth, jadi transaksi 'pending' dicek ulang secara berkala.
+func StartPaymentReconcileJob() {
+	if !paymentProviderActive() {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			reconcilePendingPayments()
+		}
+	}()
+}
+
+func reconcilePendingPayments() {
+	rows, err := database.DB.Query(`
+		SELECT midtrans_order_id FROM transactions
+		WHERE status = 'pending'
+		  AND midtrans_order_id LIKE 'BOOTH-%'
+		  AND created_at > NOW() - INTERVAL '30 minutes'
+		ORDER BY created_at DESC
+		LIMIT 20`)
+	if err != nil {
+		log.Printf("reconcile query gagal: %v", err)
+		return
+	}
+	var orders []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			orders = append(orders, id)
+		}
+	}
+	rows.Close()
+
+	for _, orderID := range orders {
+		status, err := services.CheckPaymentStatus(orderID)
+		if err != nil {
+			continue // coba lagi di putaran berikutnya
+		}
+		switch status {
+		case "paid":
+			if _, err := markTransactionPaid(orderID); err == nil {
+				log.Printf("reconcile: %s lunas (terdeteksi job, bukan booth)", orderID)
+			}
+		case "expired", "failed":
+			_, _ = database.DB.Exec(`UPDATE transactions SET status = ?
+				WHERE midtrans_order_id = ? AND status = 'pending'`, status, orderID)
+		}
+	}
+}
+
+// expirePendingPayments menutup QR milik sesi yang ditinggal pelanggan. Kalau
+// ternyata sudah dibayar di detik terakhir, sesi dipulihkan menjadi lunas.
+func expirePendingPayments(sessionID string) {
+	if !paymentProviderActive() {
+		return
+	}
+	rows, err := database.DB.Query(`
+		SELECT midtrans_order_id FROM transactions
+		WHERE session_id = ? AND status = 'pending' AND midtrans_order_id LIKE 'BOOTH-%'`,
+		sessionID)
+	if err != nil {
+		log.Printf("expire query gagal: %v", err)
+		return
+	}
+	var orders []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			orders = append(orders, id)
+		}
+	}
+	rows.Close()
+
+	for _, orderID := range orders {
+		if err := services.ExpireQRISPayment(orderID); err != nil {
+			// Gagal ditutup bisa berarti sudah dibayar; job rekonsiliasi juga menyusul.
+			if st, cerr := services.CheckPaymentStatus(orderID); cerr == nil && st == "paid" {
+				if _, merr := markTransactionPaid(orderID); merr == nil {
+					log.Printf("expire: %s ternyata sudah lunas, sesi dipulihkan", orderID)
+				}
+			}
+			continue
+		}
+		_, _ = database.DB.Exec(`UPDATE transactions SET status = 'expired'
+			WHERE midtrans_order_id = ? AND status = 'pending'`, orderID)
+	}
 }

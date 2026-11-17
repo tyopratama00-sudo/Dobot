@@ -82,10 +82,17 @@ func storedDriveFolderID(sessionID string) string {
 	return id
 }
 
+// driveUploadsActive: Drive dikonfigurasi dan R2 tidak aktif. Selama R2 aktif,
+// hasil sesi hanya naik ke R2 supaya uplink kiosk tidak terbebani dua kali;
+// kode Drive tetap ada sebagai cadangan (R2_UPLOAD_ENABLED=false).
+func driveUploadsActive() bool {
+	return services.IsDriveEnabled() && !services.IsR2Enabled()
+}
+
 // EnqueueRawPhotoUpload mengunggah satu foto raw ke folder Drive sesi secara
 // non-blocking, segera setelah foto di-capture. No-op kalau Drive tidak aktif.
 func EnqueueRawPhotoUpload(sessionID, photoID, absPath string) {
-	if !services.IsDriveEnabled() || sessionID == "" || photoID == "" {
+	if !driveUploadsActive() || sessionID == "" || photoID == "" {
 		return
 	}
 	go uploadRawPhotoToDrive(sessionID, photoID, absPath)
@@ -142,7 +149,7 @@ func rawPhotoIndex(sessionID, photoID string) int {
 // Aman terhadap dobel: finalize memakai nama file yang sama & dijaga guard
 // artefak di services.
 func EnqueueFramedStripUpload(sessionID, absPath string) {
-	if !services.IsDriveEnabled() || sessionID == "" || !fileExists(absPath) {
+	if !driveUploadsActive() || sessionID == "" || !fileExists(absPath) {
 		return
 	}
 	go func() {
@@ -180,7 +187,7 @@ func EnqueueFramedStripUpload(sessionID, absPath string) {
 // di-skip. Sesi hanya ditandai `drive_synced` kalau SEMUA file berhasil —
 // selama belum, retry job di bawah akan terus menyusulkannya.
 func UploadSessionToDrive(sessionID string) {
-	if !services.IsDriveEnabled() {
+	if !driveUploadsActive() {
 		return
 	}
 
@@ -310,8 +317,8 @@ const (
 
 // StartDriveRetryJob menjalankan penyusul upload Drive di background.
 func StartDriveRetryJob() {
-	if !services.IsDriveEnabled() {
-		log.Println("ℹ️  drive retry job non-aktif (Drive belum dikonfigurasi)")
+	if !driveUploadsActive() {
+		log.Println("ℹ️  drive retry job non-aktif (Drive belum dikonfigurasi, atau R2 aktif)")
 		return
 	}
 	log.Printf("☁️  Drive retry job aktif (cek tiap %s)", driveRetryInterval)
@@ -430,23 +437,22 @@ func collectFinalDriveFiles(sessionID string) []finalDriveFile {
 	return files
 }
 
-// GetSessionDriveLink — GET /api/photo/session/{sessionID}/drive
+// GetSessionResultLink — GET /api/photo/session/{sessionID}/drive (path lama
+// dipertahankan supaya booth tidak perlu diubah).
 // Mengembalikan {enabled, ready, url}. Frontend mem-poll endpoint ini; saat
-// `ready` true, QR diarahkan ke `url` (folder Drive publik).
-func GetSessionDriveLink(w http.ResponseWriter, r *http.Request) {
+// `ready` true, QR diarahkan ke `url` (Halaman Hasil sesi: R2 atau folder Drive).
+func GetSessionResultLink(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	if sessionID == "" {
 		respondError(w, http.StatusBadRequest, "session_id wajib")
 		return
 	}
 
-	enabled := services.IsDriveEnabled()
+	enabled := services.IsR2Enabled() || services.IsDriveEnabled()
 
 	var url string
 	if enabled {
-		_ = database.DB.QueryRow(
-			`SELECT drive_url FROM sessions WHERE id = ?`, sessionID,
-		).Scan(&url)
+		url = sessionResultLink(sessionID)
 	}
 
 	respondJSON(w, http.StatusOK, models.SuccessResponse(map[string]interface{}{

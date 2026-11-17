@@ -30,6 +30,10 @@ func InitMidtrans() {
 
 // CreateQRISPayment membuat transaksi QRIS baru via Midtrans Core API
 func CreateQRISPayment(orderID string, amount int, sessionID string) (*QRISResult, error) {
+	if PaymentGatewayEnabled() {
+		return gatewayCreateQRIS(orderID, amount, sessionID)
+	}
+
 	sid := sessionID
 
 	req := &coreapi.ChargeReq{
@@ -66,6 +70,10 @@ func CreateQRISPayment(orderID string, amount int, sessionID string) (*QRISResul
 // CheckPaymentStatus cek status transaksi ke Midtrans
 // Return: "paid", "pending", "failed", "expired"
 func CheckPaymentStatus(orderID string) (string, error) {
+	if PaymentGatewayEnabled() {
+		return gatewayCheckStatus(orderID)
+	}
+
 	resp, err := midtransClient.CheckTransaction(orderID)
 	if err != nil {
 		return "", fmt.Errorf("gagal cek transaksi: %w", err)
@@ -83,6 +91,17 @@ func CheckPaymentStatus(orderID string) (string, error) {
 	default:
 		return resp.TransactionStatus, nil
 	}
+}
+
+// ExpireQRISPayment menutup QR yang belum dibayar supaya tidak bisa dibayar lagi.
+func ExpireQRISPayment(orderID string) error {
+	if PaymentGatewayEnabled() {
+		return gatewayExpire(orderID)
+	}
+	if _, err := midtransClient.ExpireTransaction(orderID); err != nil {
+		return fmt.Errorf("midtrans expire gagal: %w", err)
+	}
+	return nil
 }
 
 // VerifyMidtransSignature memverifikasi signature webhook Midtrans.
