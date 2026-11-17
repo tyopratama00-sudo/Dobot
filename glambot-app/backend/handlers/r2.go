@@ -224,10 +224,18 @@ func resultPageFor(sessionID string) (resultPage, error) {
 func sessionResultLink(sessionID string) string {
 	var r2, drive string
 	_ = database.DB.QueryRow(`SELECT r2_url, drive_url FROM sessions WHERE id = ?`, sessionID).Scan(&r2, &drive)
-	if r2 != "" {
-		return r2
+	link, _ := pickResultLink(r2, false, drive, false)
+	return link
+}
+
+// pickResultLink satu-satunya aturan link Halaman Hasil: halaman R2 kalau ada,
+// kalau tidak folder Drive. synced ikut dari tempat link itu berada. (Daftar
+// sesi admin memakai aturan yang sama dalam SQL, lihat sessionSelect.)
+func pickResultLink(r2URL string, r2Synced bool, driveURL string, driveSynced bool) (link string, synced bool) {
+	if r2URL != "" {
+		return r2URL, r2Synced
 	}
-	return drive
+	return driveURL, driveSynced
 }
 
 // r2GIF satu GIF sesi: file lokal dan nama objeknya di R2.

@@ -26,7 +26,7 @@ type adminSession struct {
 	Status      string  `json:"status"`
 	Frame       string  `json:"frame"`
 	Photos      int     `json:"photos"`
-	DriveURL    string  `json:"drive_url"`
+	ResultURL   string  `json:"result_url"` // link Halaman Hasil: R2, lalu Drive
 	CreatedAt   string  `json:"created_at"`
 	CompletedAt *string `json:"completed_at,omitempty"`
 	// Registrasi melekat pada sesi (ADR 0001); kosong bila belum registrasi.
@@ -40,10 +40,11 @@ type adminSession struct {
 	expiresAt             time.Time
 }
 
+// sessionSelect: kolom link memakai aturan pickResultLink (R2, lalu Drive).
 const sessionSelect = `s.id, COALESCE(p.name, s.package_code), s.price, s.discount, s.final_price,
 	s.print_count, s.status, COALESCE(f.name, ''),
 	(SELECT COUNT(*) FROM photos ph WHERE ph.session_id = s.id AND ph.type = 'raw'),
-	COALESCE(s.drive_url, ''), s.created_at, s.completed_at,
+	COALESCE(NULLIF(s.r2_url, ''), s.drive_url, ''), s.created_at, s.completed_at,
 	s.registration_name, s.registration_email, s.registration_whatsapp, s.registered_at, s.registration_deleted_at, s.expires_at
 	FROM sessions s
 	LEFT JOIN packages p ON p.id = s.package_id
@@ -58,7 +59,7 @@ func scanSession(row interface{ Scan(...any) error }) (adminSession, error) {
 		regDel    sql.NullTime
 	)
 	err := row.Scan(&s.ID, &s.Package, &s.Price, &s.Discount, &s.FinalPrice, &s.PrintCount,
-		&s.Status, &s.Frame, &s.Photos, &s.DriveURL, &created, &completed,
+		&s.Status, &s.Frame, &s.Photos, &s.ResultURL, &created, &completed,
 		&s.RegistrationName, &s.RegistrationEmail, &s.RegistrationWhatsApp, &reg, &regDel, &s.expiresAt)
 	s.CreatedAt = created.Format(time.RFC3339)
 	if completed.Valid {
@@ -172,10 +173,10 @@ func registrationOf(s adminSession, now time.Time) *sessionRegistration {
 		reg.WhatsAppLinkReason = "Belum ada nomor WhatsApp"
 	case s.Status == string(models.StatusExpired) || !s.expiresAt.After(now):
 		reg.WhatsAppLinkReason = "Sesi sudah kedaluwarsa, foto sudah dihapus"
-	case s.DriveURL == "":
-		reg.WhatsAppLinkReason = "Link foto belum tersedia (Google Drive)"
+	case s.ResultURL == "":
+		reg.WhatsAppLinkReason = "Link Halaman Hasil belum tersedia"
 	default:
-		link := whatsappLink(s.RegistrationWhatsApp, s.RegistrationName, emailFotoBoothName(), s.DriveURL, s.expiresAt)
+		link := whatsappLink(s.RegistrationWhatsApp, s.RegistrationName, emailFotoBoothName(), s.ResultURL, s.expiresAt)
 		reg.WhatsAppLink = &link
 	}
 	return reg
@@ -183,12 +184,12 @@ func registrationOf(s adminSession, now time.Time) *sessionRegistration {
 
 // whatsappLink menyusun link wa.me berisi pesan siap kirim. Spasi ditulis
 // %20 (bukan +) supaya WhatsApp menampilkannya apa adanya.
-func whatsappLink(number, name, booth, folder string, expires time.Time) string {
+func whatsappLink(number, name, booth, resultURL string, expires time.Time) string {
 	if name == "" {
 		name = "kamu"
 	}
 	msg := fmt.Sprintf("Halo %s, ini foto kamu dari %s 📸 %s Link berlaku sampai %s.",
-		name, booth, folder, indonesianTime(expires))
+		name, booth, resultURL, indonesianTime(expires))
 	return "https://wa.me/" + number + "?text=" + strings.ReplaceAll(url.QueryEscape(msg), "+", "%20")
 }
 

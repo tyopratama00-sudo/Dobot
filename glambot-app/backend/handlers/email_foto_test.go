@@ -131,7 +131,7 @@ func TestEmailFotoSendsLinkAndStripOnceDriveIsComplete(t *testing.T) {
 	}
 }
 
-func TestEmailFotoWaitsForDriveThenSendsStripOnlyAfterTenMinutes(t *testing.T) {
+func TestEmailFotoWaitsForTheResultPageThenSendsStripOnlyAfterTenMinutes(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
 	id := emailFotoSession(t)
@@ -151,9 +151,9 @@ func TestEmailFotoWaitsForDriveThenSendsStripOnlyAfterTenMinutes(t *testing.T) {
 	}
 	m := sent[0]
 	if strings.Contains(m.Text, driveFolderURL) || strings.Contains(m.HTML, driveFolderURL) {
-		t.Error("strip-only email carries the unfinished folder link")
+		t.Error("strip-only email carries the unfinished result page link")
 	}
-	if !strings.Contains(m.Text, "Link folder foto sesimu tidak tersedia") || !strings.Contains(m.Text, "Halo Rina Putri") {
+	if !strings.Contains(m.Text, "Link foto sesimu tidak tersedia") || !strings.Contains(m.Text, "Halo Rina Putri") {
 		t.Errorf("text:\n%s", m.Text)
 	}
 	if len(m.Attachments) != 1 {
@@ -423,20 +423,20 @@ func TestEmailFotoSkippedWhenRawPhotosHaveNoLink(t *testing.T) {
 	addPhoto(t, id, "raw", t0.Add(2*time.Minute))
 
 	RunEmailFotoDispatch(t0.Add(12 * time.Minute))
-	want := "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif"
+	want := "tidak ada yang bisa dikirim: strip belum jadi dan Halaman Hasil tidak aktif"
 	if d := delivery(t, id); d.Status != "skipped" || d.LastError != want || len(fake.Sent()) != 0 {
 		t.Fatalf("delivery = %+v, sent %d", d, len(fake.Sent()))
 	}
 }
 
-func TestEmailFotoSkippedWhenRawPhotosHaveNoDriveFolder(t *testing.T) {
+func TestEmailFotoSkippedWhenRawPhotosHaveNoResultPageLink(t *testing.T) {
 	fake := emailFotoEnv(t)
 	enableDrive(t)
 	id := emailFotoSession(t) // Drive aktif, tapi folder sesi tidak pernah dibuat
 	addPhoto(t, id, "raw", t0.Add(2*time.Minute))
 
 	RunEmailFotoDispatch(t0.Add(12 * time.Minute))
-	want := "tidak ada yang bisa dikirim: strip belum jadi dan link Drive tidak tersedia"
+	want := "tidak ada yang bisa dikirim: strip belum jadi dan link Halaman Hasil tidak tersedia"
 	if d := delivery(t, id); d.Status != "skipped" || d.LastError != want || len(fake.Sent()) != 0 {
 		t.Fatalf("delivery = %+v, sent %d", d, len(fake.Sent()))
 	}

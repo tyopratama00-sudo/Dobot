@@ -51,8 +51,9 @@ const (
 
 const (
 	emailFotoInterval = time.Minute
-	// Tunggu Drive sesudah sesi selesai (atau sesudah foto terakhir untuk sesi
-	// tanpa strip) sebelum mengirim tanpa link / menyerah soal foto.
+	// Tunggu Halaman Hasil lengkap sesudah sesi selesai (atau sesudah foto
+	// terakhir untuk sesi tanpa strip) sebelum mengirim tanpa link / menyerah
+	// soal foto.
 	emailFotoQuiet = 10 * time.Minute
 	// Booth mengirim heartbeat berisi sesi yang sedang tampil tiap 10 detik
 	// (POST /api/session/{id}/heartbeat → sessions.last_seen_at). Sesi yang
@@ -64,11 +65,11 @@ const (
 	emailFotoSendTimeout = 90 * time.Second
 	defaultBoothName     = "Glambot Photo Booth"
 
-	reasonNoPhotos    = "tidak ada foto"
-	reasonNoDrive     = "tidak ada yang bisa dikirim: strip belum jadi dan Drive tidak aktif"
-	reasonNoDriveLink = "tidak ada yang bisa dikirim: strip belum jadi dan link Drive tidak tersedia"
-	reasonDataDeleted = "data dihapus"
-	reasonPhotosGone  = models.EmailFotoReasonPhotosGone
+	reasonNoPhotos     = "tidak ada foto"
+	reasonNoResultPage = "tidak ada yang bisa dikirim: strip belum jadi dan Halaman Hasil tidak aktif"
+	reasonNoResultLink = "tidak ada yang bisa dikirim: strip belum jadi dan link Halaman Hasil tidak tersedia"
+	reasonDataDeleted  = "data dihapus"
+	reasonPhotosGone   = models.EmailFotoReasonPhotosGone
 )
 
 // Jeda percobaan ulang setelah gagal ke-1, ke-2, ke-3; sesudahnya tiap jam.
@@ -241,8 +242,10 @@ type pendingEmailFoto struct {
 	ExpiresAt                       time.Time
 	CompletedAt, RegisteredAt       *time.Time
 	LastSeenAt                      *time.Time
-	DriveURL                        string
-	DriveSynced                     bool
+	// Link Halaman Hasil sesi (R2, lalu Drive) dan apakah semua file sesi
+	// sudah ada di tempat link itu berada.
+	ResultURL    string
+	ResultSynced bool
 }
 
 // RunEmailFotoDispatch satu putaran dispatcher pada waktu now: memproses
@@ -302,12 +305,15 @@ func lockEmailFoto(tx *database.TxWrapper, sessionID string, now time.Time) (pen
 	).Scan(&p.Recipient, &p.LastError, &p.Attempts); err != nil {
 		return p, err
 	}
+	var r2URL, driveURL string
+	var r2Synced, driveSynced bool
 	err := tx.QueryRow(`
 		SELECT status, registration_name, expires_at, completed_at, registered_at, last_seen_at,
-		       drive_url, drive_synced
+		       r2_url, r2_synced, drive_url, drive_synced
 		FROM sessions WHERE id = ?`, sessionID,
 	).Scan(&p.SessionStatus, &p.Name, &p.ExpiresAt, &p.CompletedAt, &p.RegisteredAt, &p.LastSeenAt,
-		&p.DriveURL, &p.DriveSynced)
+		&r2URL, &r2Synced, &driveURL, &driveSynced)
+	p.ResultURL, p.ResultSynced = pickResultLink(r2URL, r2Synced, driveURL, driveSynced)
 	return p, err
 }
 
@@ -413,12 +419,13 @@ func finishEmailFoto(q sqlRunner, sessionID, status, reason string) {
 // berikutnya. ready=true dengan content kosong: tidak ada yang bisa dikirim,
 // skip berisi alasannya.
 func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, strip *mailer.Attachment, skip string, ready bool) {
-	driveOn := services.IsDriveEnabled()
-	link := driveOn && p.DriveURL != ""
+	// Link hanya dikirim selama upload Halaman Hasil (R2 atau Drive) aktif.
+	resultOn := services.IsR2Enabled() || services.IsDriveEnabled()
+	link := resultOn && p.ResultURL != ""
 
 	if strip = emailFotoStrip(p.SessionID); strip != nil {
 		switch {
-		case link && p.DriveSynced:
+		case link && p.ResultSynced:
 			return EmailFotoLinkStrip, strip, "", true
 		case p.CompletedAt != nil && !now.Before(p.CompletedAt.Add(emailFotoQuiet)):
 			return EmailFotoStripOnly, strip, "", true
@@ -452,10 +459,10 @@ func emailFotoReadiness(now time.Time, p pendingEmailFoto) (content string, stri
 	switch {
 	case raws == 0:
 		return "", nil, reasonNoPhotos, true
-	case !driveOn:
-		return "", nil, reasonNoDrive, true
+	case !resultOn:
+		return "", nil, reasonNoResultPage, true
 	case !link:
-		return "", nil, reasonNoDriveLink, true
+		return "", nil, reasonNoResultLink, true
 	}
 	return EmailFotoLinkOnly, nil, "", true
 }
@@ -548,11 +555,11 @@ func emailFotoMessage(booth string, p pendingEmailFoto, content string, now time
 	paras := []para{{text: fmt.Sprintf("Terima kasih sudah berfoto di %s!", booth)}}
 	if withLink {
 		paras = append(paras,
-			para{text: "Semua foto dan GIF dari sesimu bisa diunduh di link berikut:", link: p.DriveURL},
+			para{text: "Semua foto dan GIF dari sesimu bisa diunduh di link berikut:", link: p.ResultURL},
 			para{text: fmt.Sprintf("Link ini tersedia %s, sampai %s. Unduh fotomu sebelum waktu itu ya.",
 				linkLifetime(now, p.ExpiresAt), indonesianTime(p.ExpiresAt))})
 	} else {
-		paras = append(paras, para{text: "Link folder foto sesimu tidak tersedia, jadi strip foto finalmu kami lampirkan di email ini."})
+		paras = append(paras, para{text: "Link foto sesimu tidak tersedia, jadi strip foto finalmu kami lampirkan di email ini."})
 	}
 	if withLink && withStrip {
 		paras = append(paras, para{text: "Strip foto finalmu juga kami lampirkan di email ini."})
