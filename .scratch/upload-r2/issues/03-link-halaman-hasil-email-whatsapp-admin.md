@@ -6,10 +6,16 @@ Spec: `.scratch/upload-r2/spec.md`. Glossary: Halaman Hasil, Email Foto.
 
 **Blocked by:** 02 (Finalisasi, retry job, dan compose ulang)
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di f3b8991
 
-- [ ] Sesi dengan link R2 yang sudah tersinkron ke R2 mendapat Email Foto berisi link `index.html` dan strip, walaupun Drive mati.
-- [ ] Sesi dengan link R2 yang belum tersinkron menunggu, lalu jatuh ke "strip saja" setelah masa tunggu seperti sekarang.
-- [ ] Sesi lama yang hanya punya link Drive tetap mendapat link Drive di Email Foto dan WhatsApp.
-- [ ] Link WhatsApp memakai link Halaman Hasil per sesi; tombol nonaktif dengan alasan yang tidak menyebut Google Drive kalau sesi belum punya link.
-- [ ] Detail sesi admin menampilkan kolom "Halaman Hasil" berisi link per sesi.
+- [x] Sesi dengan link R2 yang sudah tersinkron ke R2 mendapat Email Foto berisi link `index.html` dan strip, walaupun Drive mati.
+- [x] Sesi dengan link R2 yang belum tersinkron menunggu, lalu jatuh ke "strip saja" setelah masa tunggu seperti sekarang.
+- [x] Sesi lama yang hanya punya link Drive tetap mendapat link Drive di Email Foto dan WhatsApp.
+- [x] Link WhatsApp memakai link Halaman Hasil per sesi; tombol nonaktif dengan alasan yang tidak menyebut Google Drive kalau sesi belum punya link.
+- [x] Detail sesi admin menampilkan kolom "Halaman Hasil" berisi link per sesi.
+
+## Comments
+
+- Aturan link ada di satu fungsi murni `pickResultLink`; daftar sesi admin memakai aturan yang sama dalam SQL (dirujuk di komentar).
+- Field API admin `drive_url` diganti `result_url`; satu-satunya pemakainya (detail sesi di admin) ikut diubah.
+- Email Foto tetap hanya mengirim link selama R2 atau Drive aktif (perilaku lama), sedangkan WhatsApp dan admin menampilkan link per sesi tanpa melihat konfigurasi.
