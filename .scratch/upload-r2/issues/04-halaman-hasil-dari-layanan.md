@@ -20,3 +20,4 @@ Spec: `.scratch/upload-r2/spec.md` (bagian halaman buatan booth digantikan tiket
 - Halaman Hasil tidak lagi punya catatan "GIF sedang disiapkan": tampilan halaman sepenuhnya milik layanan.
 - Mock diuji dengan skrip Bagian 7 referensi (output sama) dan semua kode error di tabel Bagian 6.
 - Belum diuji ke layanan produksi: menunggu token asli dan R2 aktif dari owner.
+- Disesuaikan dengan Panduan Upload & Download Foto v1.0 (18 Nov 2026): start dipanggil sejak foto pertama (kunci per sesi), publish 409 no_files tidak dicatat sebagai error, dan alamat presign tidak lagi ikut di pesan error/log.

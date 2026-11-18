@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"photobooth/database"
 	"photobooth/services"
+	"strings"
 	"sync"
 	"time"
 )
@@ -105,6 +106,12 @@ func uploadRawPhotoToR2(sessionID, photoID, absPath string) {
 		return
 	}
 
+	// Link Halaman Hasil diminta sejak foto pertama, supaya QR siap sebelum
+	// compose. Gagal start tidak menahan upload foto: finalize mencobanya lagi.
+	if err := ensureResultPageLink(sessionID); err != nil {
+		log.Printf("⚠️  r2 start halaman hasil gagal (%s): %v — akan dicoba lagi saat compose", sessionID, err)
+	}
+
 	if err := uploadFileToR2(sessionID, name, absPath); err != nil {
 		log.Printf("⚠️  r2 upload foto gagal (%s, %s): %v — akan dicoba lagi saat finalize", sessionID, name, err)
 		return
@@ -162,9 +169,18 @@ func EnqueueFramedStripUploadR2(sessionID string) <-chan struct{} {
 	return done
 }
 
+// r2StartLocks satu mutex per sesi untuk start: foto yang diunggah bersamaan
+// tidak masing-masing memanggil start.
+var r2StartLocks sync.Map
+
 // ensureResultPageLink memastikan sesi punya link Halaman Hasil: kalau belum,
 // meminta layanan menyiapkannya (start) lalu menyimpan link-nya.
 func ensureResultPageLink(sessionID string) error {
+	m, _ := r2StartLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
 	var current string
 	if err := database.DB.QueryRow(`SELECT r2_url FROM sessions WHERE id = ?`, sessionID).Scan(&current); err != nil {
 		return err
@@ -313,7 +329,11 @@ func finalizeSessionToR2(sessionID string, composedAt sql.NullTime) {
 	}
 
 	if err := publishResultPage(sessionID); err != nil {
-		log.Printf("⚠️  r2 finalize publish gagal (%s): %v — retry job akan menyusulkan", sessionID, err)
+		// 409 no_files: belum ada file yang naik; penyebabnya sudah tercatat
+		// di atas, jadi tidak dicatat lagi.
+		if !strings.Contains(err.Error(), "no_files") {
+			log.Printf("⚠️  r2 finalize publish gagal (%s): %v — retry job akan menyusulkan", sessionID, err)
+		}
 		return
 	}
 	if complete {

@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"photobooth/config"
@@ -91,6 +93,12 @@ func putToR2(ctx context.Context, key string, body io.Reader, size int64, conten
 
 	resp, err := uploadHTTP.Do(req)
 	if err != nil {
+		// Error HTTP Go memuat alamat lengkap; alamat presign bisa dipakai
+		// siapa pun selama 5 menit, jadi jangan sampai ikut ke log.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
 		return "", fmt.Errorf("upload %s: %w", key, err)
 	}
 	defer resp.Body.Close()

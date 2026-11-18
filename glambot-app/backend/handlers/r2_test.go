@@ -315,6 +315,20 @@ func TestComposedStripMakesTheQRPointToTheResultPage(t *testing.T) {
 	}
 }
 
+// Link Halaman Hasil diminta saat foto pertama diambil (Panduan Upload &
+// Download Foto 5.3), jadi QR sudah bisa dipakai sebelum compose.
+func TestFirstCapturedPhotoMakesTheQRReady(t *testing.T) {
+	g := r2Env(t)
+	id := paidSession(t)
+
+	capturePhoto(t, id, []byte("JPEG satu"))
+	g.waitObject(t, "sessions/"+id+"/foto-1.jpg")
+
+	if l := waitQRReady(t, id); l.URL != r2PublicBase+"sessions/"+id+"/index.html" {
+		t.Errorf("link = %+v", l)
+	}
+}
+
 // Halaman Hasil dibuat layanan; layanan menolak index.html dari booth.
 func TestBoothNeverUploadsItsOwnResultPage(t *testing.T) {
 	g := r2Env(t)
