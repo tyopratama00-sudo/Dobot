@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -30,32 +32,63 @@ type r2Object struct {
 	body        []byte
 }
 
-// fakeR2 meniru pay.photorobot.id (presign) sekaligus R2 (PUT): setiap file
-// yang diunggah kiosk disimpan di memori menurut key-nya.
+// r2ContentTypes ekstensi yang diterima presign layanan (Referensi API 4.2).
+var r2ContentTypes = map[string]string{
+	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+	".webp": "image/webp", ".gif": "image/gif", ".mp4": "video/mp4",
+}
+
+var r2KeyPattern = regexp.MustCompile(`^sessions/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+
+// fakeR2 meniru pay.photorobot.id (start, presign, publish) sekaligus R2
+// (PUT): setiap file yang diunggah kiosk disimpan di memori menurut key-nya,
+// dan setiap publish mencatat file apa saja yang tampil di Halaman Hasil.
 type fakeR2 struct {
-	mu      sync.Mutex
-	objects map[string]r2Object
-	history map[string][]r2Object // semua versi yang pernah diunggah per key
-	down    bool                  // true: presign menjawab 503 seperti layanan yang mati
-	srv     *httptest.Server
+	mu          sync.Mutex
+	objects     map[string]r2Object
+	presigned   []string            // semua key yang pernah diminta presign
+	published   map[string][]string // sesi -> nama file pada publish terakhir
+	emails      []string            // isi field email setiap publish
+	down        bool                // true: layanan menjawab 503 di semua endpoint R2
+	uploadsDown bool                // true: hanya presign yang gagal
+	srv         *httptest.Server
 }
 
 func startFakeR2(t *testing.T) *fakeR2 {
 	t.Helper()
-	g := &fakeR2{objects: map[string]r2Object{}, history: map[string][]r2Object{}}
+	g := &fakeR2{objects: map[string]r2Object{}, published: map[string][]string{}}
+	fail := func(w http.ResponseWriter, code int, msg string) {
+		w.WriteHeader(code)
+		json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	}
 	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/uploads/presign":
-			g.mu.Lock()
-			down := g.down
-			g.mu.Unlock()
-			if down {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte(`{"error":"r2_not_configured"}`))
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/put/") {
+			var buf bytes.Buffer
+			buf.ReadFrom(r.Body)
+			if int64(buf.Len()) != r.ContentLength || r.Header.Get("Authorization") != "" {
+				w.WriteHeader(http.StatusForbidden)
 				return
 			}
-			if r.Header.Get("Authorization") != "Bearer tok-rahasia" {
-				w.WriteHeader(http.StatusUnauthorized)
+			g.mu.Lock()
+			g.objects[strings.TrimPrefix(r.URL.Path, "/put/")] = r2Object{r.Header.Get("Content-Type"), buf.Bytes()}
+			g.mu.Unlock()
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer tok-rahasia" {
+			fail(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if g.down {
+			fail(w, http.StatusServiceUnavailable, "r2_not_configured")
+			return
+		}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/uploads/presign":
+			if g.uploadsDown {
+				fail(w, http.StatusBadGateway, "r2_error")
 				return
 			}
 			var req struct {
@@ -64,29 +97,49 @@ func startFakeR2(t *testing.T) *fakeR2 {
 				Size        int64  `json:"size"`
 			}
 			json.NewDecoder(r.Body).Decode(&req)
-			if !strings.HasPrefix(req.Key, "sessions/") || req.Size < 1 {
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte(`{"error":"invalid_key"}`))
+			g.presigned = append(g.presigned, req.Key)
+			if !r2KeyPattern.MatchString(req.Key) || strings.HasSuffix(req.Key, "/index.html") {
+				fail(w, http.StatusBadRequest, "invalid_key")
+				return
+			}
+			if r2ContentTypes[strings.ToLower(filepath.Ext(req.Key))] != req.ContentType {
+				fail(w, http.StatusBadRequest, "invalid_content_type")
+				return
+			}
+			if req.Size < 1 {
+				fail(w, http.StatusBadRequest, "invalid_size")
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"url":        g.srv.URL + "/put/" + req.Key,
-				"headers":    map[string]string{"Content-Type": req.ContentType, "Cache-Control": "no-cache"},
+				"headers":    map[string]string{"Content-Type": req.ContentType, "Cache-Control": "public, max-age=86400"},
 				"public_url": r2PublicBase + req.Key,
 				"expires_in": 300,
 			})
-		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/put/"):
-			var buf bytes.Buffer
-			buf.ReadFrom(r.Body)
-			if int64(buf.Len()) != r.ContentLength {
-				w.WriteHeader(http.StatusForbidden)
+		case r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "sessions" && parts[3] == "start":
+			json.NewEncoder(w).Encode(map[string]string{"url": r2PublicBase + "sessions/" + parts[2] + "/index.html"})
+		case r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "sessions" && parts[3] == "publish":
+			var req struct {
+				Email string `json:"email"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			prefix := "sessions/" + parts[2] + "/"
+			var files []string
+			for key := range g.objects {
+				if strings.HasPrefix(key, prefix) {
+					files = append(files, strings.TrimPrefix(key, prefix))
+				}
+			}
+			if len(files) == 0 {
+				fail(w, http.StatusConflict, "no_files")
 				return
 			}
-			g.mu.Lock()
-			key, obj := strings.TrimPrefix(r.URL.Path, "/put/"), r2Object{r.Header.Get("Content-Type"), buf.Bytes()}
-			g.objects[key] = obj
-			g.history[key] = append(g.history[key], obj)
-			g.mu.Unlock()
+			sort.Strings(files)
+			g.published[parts[2]] = files
+			g.emails = append(g.emails, req.Email)
+			json.NewEncoder(w).Encode(map[string]any{
+				"url": r2PublicBase + prefix + "index.html", "files": len(files), "email": "none",
+			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -100,6 +153,13 @@ func (g *fakeR2) object(key string) (r2Object, bool) {
 	defer g.mu.Unlock()
 	o, ok := g.objects[key]
 	return o, ok
+}
+
+// publishedFiles isi Halaman Hasil sesi menurut publish terakhir.
+func (g *fakeR2) publishedFiles(sessionID string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return strings.Join(g.published[sessionID], ",")
 }
 
 // waitObject menunggu upload latar belakang sampai ke gateway.
@@ -246,80 +306,53 @@ func TestComposedStripMakesTheQRPointToTheResultPage(t *testing.T) {
 	if !link.Enabled || link.URL != r2PublicBase+"sessions/"+id+"/index.html" {
 		t.Errorf("link = %+v", link)
 	}
+	backgroundUploads.Wait()
 	if o, _ := g.object("sessions/" + id + "/strip.jpg"); string(o.body) != "JPEG strip" || o.contentType != "image/jpeg" {
 		t.Errorf("strip: isi %q, tipe %q", o.body, o.contentType)
 	}
-	if o, _ := g.object("sessions/" + id + "/index.html"); o.contentType != "text/html; charset=utf-8" {
-		t.Errorf("index.html tipe %q", o.contentType)
+	if got := g.publishedFiles(id); got != "foto-1.jpg,strip.jpg" {
+		t.Errorf("Halaman Hasil berisi %q", got)
 	}
 }
 
-// resultPageHTML Halaman Hasil sesi versi terakhir, setelah semua upload selesai.
-func resultPageHTML(t *testing.T, g *fakeR2, sessionID string) string {
-	t.Helper()
-	waitQRReady(t, sessionID)
+// Halaman Hasil dibuat layanan; layanan menolak index.html dari booth.
+func TestBoothNeverUploadsItsOwnResultPage(t *testing.T) {
+	g := r2Env(t)
+	id := paidSession(t)
+	foto := capturePhoto(t, id, []byte("JPEG satu"))
+	fakeGIFs(t, id)
+	composeStrip(t, id, []string{foto}, []byte("JPEG strip"))
 	backgroundUploads.Wait()
-	o, ok := g.object("sessions/" + sessionID + "/index.html")
-	if !ok {
-		t.Fatal("index.html belum diunggah")
-	}
-	return string(o.body)
-}
 
-// firstResultPageHTML versi Halaman Hasil yang pertama kali diunggah (yang
-// dilihat pelanggan begitu QR siap, sebelum GIF selesai).
-func firstResultPageHTML(t *testing.T, g *fakeR2, sessionID string) string {
-	t.Helper()
-	waitQRReady(t, sessionID)
-	o, ok := g.firstVersion("sessions/" + sessionID + "/index.html")
-	if !ok {
-		t.Fatal("index.html belum diunggah")
-	}
-	return string(o.body)
-}
-
-// firstVersion versi pertama yang pernah diunggah untuk key.
-func (g *fakeR2) firstVersion(key string) (r2Object, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if v := g.history[key]; len(v) > 0 {
-		return v[0], true
+	if len(g.presigned) == 0 {
+		t.Fatal("tidak ada upload sama sekali")
 	}
-	return r2Object{}, false
+	for _, key := range g.presigned {
+		if strings.HasSuffix(key, "/index.html") {
+			t.Errorf("booth meminta presign %s", key)
+		}
+	}
 }
 
-func TestFirstResultPageShowsStripUploadedPhotosAndGIFNote(t *testing.T) {
+// Link dari start tidak berubah sampai akhir, jadi QR bisa tampil walaupun
+// upload strip sedang gagal; sesinya disusulkan retry job.
+func TestQRIsReadyEvenWhenTheStripUploadFails(t *testing.T) {
 	g := r2Env(t)
-	mustExec(t, `INSERT INTO app_settings (key, value) VALUES ('brand_label', 'Booth <Ceria>')
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`)
 	id := paidSession(t)
+	g.mu.Lock()
+	g.uploadsDown = true
+	g.mu.Unlock()
 
-	// Foto pertama diambil sebelum R2 dinyalakan, jadi tidak ada di R2.
-	config.App.R2UploadEnabled = false
-	f1 := capturePhoto(t, id, []byte("JPEG satu"))
-	config.App.R2UploadEnabled = true
-	f2 := capturePhoto(t, id, []byte("JPEG dua"))
-	g.waitObject(t, "sessions/"+id+"/foto-2.jpg")
-	backgroundUploads.Wait() // penanda foto-2 terunggah sudah tersimpan
+	composeStrip(t, id, nil, []byte("JPEG strip"))
 
-	composeStrip(t, id, []string{f1, f2}, []byte("JPEG strip"))
-	page := firstResultPageHTML(t, g, id)
-
-	for _, want := range []string{
-		`lang="id"`,
-		`Booth &lt;Ceria&gt;`,
-		`href="strip.jpg" download`,
-		`href="foto-2.jpg" download`,
-		`GIF sedang disiapkan. Muat ulang halaman ini sebentar lagi.`,
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("halaman tidak memuat %q", want)
-		}
+	if l := waitQRReady(t, id); l.URL != r2PublicBase+"sessions/"+id+"/index.html" {
+		t.Errorf("link = %+v", l)
 	}
-	for _, unwanted := range []string{"foto-1.jpg", "<script", "<form", "base64", "http://", "https://"} {
-		if strings.Contains(page, unwanted) {
-			t.Errorf("halaman memuat %q", unwanted)
-		}
+	backgroundUploads.Wait()
+	if r2Synced(t, id) {
+		t.Error("sesi ditandai tersinkron padahal strip belum terunggah")
 	}
 }
 
@@ -345,7 +378,7 @@ func TestQRLinkIsDisabledWhenNeitherR2NorDriveIsOn(t *testing.T) {
 }
 
 // Jam Windows kasar: dua foto bisa tercatat dengan created_at yang sama. Nomor
-// foto-N tetap harus berbeda dan sama dengan yang dicantumkan Halaman Hasil.
+// foto-N tetap harus berbeda dan tetap sama setiap kali diunggah.
 func TestPhotosCapturedAtTheSameInstantGetDistinctNumbers(t *testing.T) {
 	g := r2Env(t)
 	id := paidSession(t)
@@ -417,15 +450,17 @@ func TestFinishedGIFsCompleteTheResultPage(t *testing.T) {
 			t.Errorf("%s: isi %q, tipe %q", key, o.body, o.contentType)
 		}
 	}
-	page := resultPageHTML(t, g, id)
-	for _, want := range []string{`href="slideshow.gif" download`, `href="live-strip.gif" download`, `href="foto-1.jpg" download`, `href="strip.jpg" download`} {
-		if !strings.Contains(page, want) {
-			t.Errorf("halaman akhir tidak memuat %q", want)
+	if got := g.publishedFiles(id); got != "foto-1.jpg,live-strip.gif,slideshow.gif,strip.jpg" {
+		t.Errorf("Halaman Hasil akhir berisi %q", got)
+	}
+	// Email Foto dikirim booth sendiri, bukan oleh publish.
+	g.mu.Lock()
+	for _, e := range g.emails {
+		if e != "" {
+			t.Errorf("publish mengirim email %q", e)
 		}
 	}
-	if strings.Contains(page, "GIF sedang disiapkan") {
-		t.Error("halaman akhir masih menyebut GIF sedang disiapkan")
-	}
+	g.mu.Unlock()
 	if !r2Synced(t, id) {
 		t.Error("sesi belum ditandai tersinkron ke R2")
 	}
@@ -447,11 +482,11 @@ func TestRetryJobCompletesASessionAfterTheGatewayComesBack(t *testing.T) {
 	mustExec(t, `UPDATE sessions SET completed_at = NOW() - INTERVAL '2 minutes' WHERE id = ?`, id)
 	retryPendingR2Sessions()
 
-	page := resultPageHTML(t, g, id)
-	for _, want := range []string{`href="strip.jpg" download`, `href="foto-1.jpg" download`, `href="slideshow.gif" download`} {
-		if !strings.Contains(page, want) {
-			t.Errorf("halaman tidak memuat %q", want)
-		}
+	if l := resultLink(t, id); !l.Ready {
+		t.Errorf("link setelah retry = %+v", l)
+	}
+	if got := g.publishedFiles(id); got != "foto-1.jpg,live-strip.gif,slideshow.gif,strip.jpg" {
+		t.Errorf("Halaman Hasil setelah retry berisi %q", got)
 	}
 	if !r2Synced(t, id) {
 		t.Error("sesi belum ditandai tersinkron setelah retry")

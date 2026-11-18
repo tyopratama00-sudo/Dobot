@@ -30,8 +30,8 @@ func goBackground(fn func()) {
 	}()
 }
 
-// r2SessionLocks satu mutex per sesi: upload strip & Halaman Hasil dari compose
-// yang beruntun (compose ulang) dijalankan bergiliran, supaya versi lama tidak
+// r2SessionLocks satu mutex per sesi: upload strip & publish dari compose yang
+// beruntun (compose ulang) dijalankan bergiliran, supaya versi lama tidak
 // mendarat terakhir dan menimpa versi baru.
 var r2SessionLocks sync.Map
 
@@ -55,7 +55,7 @@ type rawPhotoObject struct {
 
 // sessionRawPhotoObjects foto raw sesi urut capture. Urutan diikat id saat
 // created_at kembar (jam Windows kasar), jadi setiap foto selalu mendapat N
-// yang sama dan berbeda dari foto lain, baik saat upload maupun di Halaman Hasil.
+// yang sama dan berbeda dari foto lain setiap kali diunggah.
 func sessionRawPhotoObjects(sessionID string) ([]rawPhotoObject, error) {
 	rows, err := database.DB.Query(`
 		SELECT id, file_path, r2_uploaded FROM photos
@@ -115,11 +115,12 @@ func uploadRawPhotoToR2(sessionID, photoID, absPath string) {
 	log.Printf("☁️  r2 %s terkirim (%s)", name, sessionID)
 }
 
-// EnqueueFramedStripUploadR2 mengirim strip ke R2 segera setelah compose,
-// lalu Halaman Hasil versi awal, lalu menyimpan link-nya: sejak itu QR booth
-// siap, tanpa menunggu GIF. Channel yang dikembalikan tertutup setelah selesai
+// EnqueueFramedStripUploadR2 dijalankan segera setelah compose: meminta link
+// Halaman Hasil ke layanan (start) dan menyimpannya, sejak itu QR booth siap
+// walaupun file belum terunggah; lalu mengirim strip dan mem-publish halaman
+// tanpa menunggu GIF. Channel yang dikembalikan tertutup setelah selesai
 // (langsung, kalau R2 tidak aktif): finalisasi compose yang sama menunggunya,
-// supaya Halaman Hasil versi awal tidak pernah menimpa versi akhir.
+// supaya publish versi akhir selalu yang terakhir.
 func EnqueueFramedStripUploadR2(sessionID string) <-chan struct{} {
 	done := make(chan struct{})
 	if !services.IsR2Enabled() || sessionID == "" {
@@ -130,6 +131,11 @@ func EnqueueFramedStripUploadR2(sessionID string) <-chan struct{} {
 		defer close(done)
 		unlock := lockR2Session(sessionID)
 		defer unlock()
+
+		if err := ensureResultPageLink(sessionID); err != nil {
+			log.Printf("⚠️  r2 start halaman hasil gagal (%s): %v — akan dicoba lagi saat finalize", sessionID, err)
+			return
+		}
 
 		// Strip terbaru dibaca ulang di dalam kunci: kalau sesi di-compose
 		// ulang, putaran mana pun yang jalan terakhir mengunggah versi terbaru.
@@ -147,18 +153,46 @@ func EnqueueFramedStripUploadR2(sessionID string) <-chan struct{} {
 			log.Printf("⚠️  r2 upload strip gagal (%s): %v — akan dicoba lagi saat finalize", sessionID, err)
 			return
 		}
-		url, err := uploadResultPage(sessionID, gifsStillGenerating)
-		if err != nil {
-			log.Printf("⚠️  r2 halaman hasil gagal (%s): %v — akan dicoba lagi saat finalize", sessionID, err)
+		if err := publishResultPage(sessionID); err != nil {
+			log.Printf("⚠️  r2 publish halaman hasil gagal (%s): %v — akan dicoba lagi saat finalize", sessionID, err)
 			return
 		}
-		if _, err := database.DB.Exec(`UPDATE sessions SET r2_url = ? WHERE id = ?`, url, sessionID); err != nil {
-			log.Printf("⚠️  gagal simpan r2_url (%s): %v", sessionID, err)
-			return
-		}
-		log.Printf("☁️  r2 strip + halaman hasil terkirim (%s)", sessionID)
+		log.Printf("☁️  r2 strip terkirim, halaman hasil ter-publish (%s)", sessionID)
 	})
 	return done
+}
+
+// ensureResultPageLink memastikan sesi punya link Halaman Hasil: kalau belum,
+// meminta layanan menyiapkannya (start) lalu menyimpan link-nya.
+func ensureResultPageLink(sessionID string) error {
+	var current string
+	if err := database.DB.QueryRow(`SELECT r2_url FROM sessions WHERE id = ?`, sessionID).Scan(&current); err != nil {
+		return err
+	}
+	if current != "" {
+		return nil
+	}
+	url, err := services.StartR2Session(sessionID)
+	if err != nil {
+		return err
+	}
+	_, err = database.DB.Exec(`UPDATE sessions SET r2_url = ? WHERE id = ?`, url, sessionID)
+	return err
+}
+
+// publishResultPage meminta layanan menyusun Halaman Hasil dari file sesi
+// yang sudah ada di R2. Email Foto dikirim booth sendiri, jadi tanpa email.
+func publishResultPage(sessionID string) error {
+	res, err := services.PublishR2Session(sessionID, "", false)
+	if err != nil {
+		return err
+	}
+	if res.URL != "" {
+		if _, err := database.DB.Exec(`UPDATE sessions SET r2_url = ? WHERE id = ?`, res.URL, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // uploadFileToR2 mengunggah satu file sesi dengan batas waktunya sendiri:
@@ -169,52 +203,6 @@ func uploadFileToR2(sessionID, name, absPath string) error {
 	defer cancel()
 	_, err := services.UploadToR2(ctx, services.R2Key(sessionID, name), absPath, services.R2ContentType(name))
 	return err
-}
-
-// gifStatus keadaan GIF sesi yang ditampilkan Halaman Hasil.
-type gifStatus struct {
-	Uploaded []string // nama GIF yang sudah ada di R2
-	Pending  bool     // GIF masih disiapkan: pelanggan diminta memuat ulang
-}
-
-// gifsStillGenerating keadaan GIF untuk Halaman Hasil versi awal.
-var gifsStillGenerating = gifStatus{Pending: true}
-
-// uploadResultPage menyusun Halaman Hasil dari file sesi yang sudah ada di R2
-// lalu mengunggahnya, dan mengembalikan URL publiknya.
-func uploadResultPage(sessionID string, gifs gifStatus) (string, error) {
-	p, err := resultPageFor(sessionID)
-	if err != nil {
-		return "", err
-	}
-	p.GIFs, p.GIFPending = gifs.Uploaded, gifs.Pending
-	page, err := renderResultPage(p)
-	if err != nil {
-		return "", err
-	}
-	ctx, cancel := services.R2Context()
-	defer cancel()
-	return services.UploadBytesToR2(ctx, services.R2Key(sessionID, "index.html"), page, services.R2HTMLContentType)
-}
-
-// resultPageFor isi Halaman Hasil: strip terbaru dan foto raw yang sudah
-// terunggah ke R2 (foto yang belum terunggah tidak dicantumkan supaya tidak
-// ada tombol yang mengarah ke file yang belum ada).
-func resultPageFor(sessionID string) (resultPage, error) {
-	p := resultPage{BoothName: emailFotoBoothName()}
-	if rel, err := latestFramedStripRelPath(sessionID); err == nil {
-		p.Strip = stripObjectName(filepath.Ext(rel))
-	}
-	photos, err := sessionRawPhotoObjects(sessionID)
-	if err != nil {
-		return p, err
-	}
-	for _, ph := range photos {
-		if ph.Uploaded {
-			p.Photos = append(p.Photos, ph.Name)
-		}
-	}
-	return p, nil
 }
 
 // sessionResultLink link Halaman Hasil sesi: halaman R2 kalau sesi punya,
@@ -244,7 +232,7 @@ type r2GIF struct {
 	Name string
 }
 
-// sessionGIFs GIF sesi urut tampil di Halaman Hasil.
+// sessionGIFs GIF sesi yang diunggah setelah generator selesai.
 func sessionGIFs(sessionID string) []r2GIF {
 	return []r2GIF{
 		{services.AnimationOutputPath(sessionID), "slideshow.gif"},
@@ -264,16 +252,22 @@ func UploadSessionToR2(sessionID string) {
 }
 
 // finalizeSessionToR2 FINALIZE untuk compose yang tersimpan pada composedAt:
-// dipanggil setelah GIF selesai, dan oleh retry job. Mengirim strip terbaru,
-// GIF yang ada, foto raw yang belum terunggah, lalu Halaman Hasil versi akhir.
-// Sesi ditandai `r2_synced` hanya kalau semuanya berhasil dan sesi tidak
-// di-compose ulang sejak composedAt; selama belum, retry job menyusulkannya.
+// dipanggil setelah GIF selesai, dan oleh retry job. Memastikan link Halaman
+// Hasil ada (start), mengirim strip terbaru, GIF yang ada, foto raw yang belum
+// terunggah, lalu mem-publish halaman versi akhir. Sesi ditandai `r2_synced`
+// hanya kalau semuanya berhasil dan sesi tidak di-compose ulang sejak
+// composedAt; selama belum, retry job menyusulkannya.
 func finalizeSessionToR2(sessionID string, composedAt sql.NullTime) {
 	if !services.IsR2Enabled() || sessionID == "" {
 		return
 	}
 	unlock := lockR2Session(sessionID)
 	defer unlock()
+
+	if err := ensureResultPageLink(sessionID); err != nil {
+		log.Printf("⚠️  r2 finalize start halaman hasil gagal (%s): %v — retry job akan menyusulkan", sessionID, err)
+		return
+	}
 
 	complete := true
 	put := func(name, path string) bool {
@@ -311,28 +305,15 @@ func finalizeSessionToR2(sessionID string, composedAt sql.NullTime) {
 		}
 	}
 
-	// GIF yang tidak ada setelah generator selesai memang tidak akan muncul,
-	// jadi halaman akhir tidak lagi menjanjikannya; GIF yang gagal terunggah
-	// tetap "sedang disiapkan" sampai retry job berhasil.
-	var gifs gifStatus
+	// GIF yang tidak ada setelah generator selesai memang tidak akan muncul.
 	for _, gif := range sessionGIFs(sessionID) {
-		if !fileExists(gif.Path) {
-			continue
-		}
-		if put(gif.Name, gif.Path) {
-			gifs.Uploaded = append(gifs.Uploaded, gif.Name)
-		} else {
-			gifs.Pending = true
+		if fileExists(gif.Path) {
+			put(gif.Name, gif.Path)
 		}
 	}
 
-	url, err := uploadResultPage(sessionID, gifs)
-	if err != nil {
-		log.Printf("⚠️  r2 finalize halaman hasil gagal (%s): %v — retry job akan menyusulkan", sessionID, err)
-		return
-	}
-	if _, err := database.DB.Exec(`UPDATE sessions SET r2_url = ? WHERE id = ?`, url, sessionID); err != nil {
-		log.Printf("⚠️  gagal simpan r2_url (%s): %v", sessionID, err)
+	if err := publishResultPage(sessionID); err != nil {
+		log.Printf("⚠️  r2 finalize publish gagal (%s): %v — retry job akan menyusulkan", sessionID, err)
 		return
 	}
 	if complete {
