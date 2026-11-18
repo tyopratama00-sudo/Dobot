@@ -6,11 +6,17 @@ Spec: `.scratch/upload-r2/spec.md` (bagian halaman buatan booth digantikan tiket
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** resolved — selesai di 79a8016
 
-- [ ] Booth tidak pernah meminta presign untuk `index.html`.
-- [ ] Compose memanggil start dan menyimpan link-nya; QR siap walaupun upload strip gagal.
-- [ ] Publish dipanggil setelah strip terunggah dan setelah finalisasi (GIF); sesi ditandai tersinkron hanya kalau semua file terunggah dan publish berhasil.
-- [ ] Retry job menyusulkan start, upload, dan publish setelah layanan pulih.
-- [ ] Session ID dikirim huruf kecil.
-- [ ] Mock gateway: start, publish (halaman galeri + email disimpan di `mock-uploads/_email/`), validasi seperti produksi.
+- [x] Booth tidak pernah meminta presign untuk `index.html`.
+- [x] Compose memanggil start dan menyimpan link-nya; QR siap walaupun upload strip gagal.
+- [x] Publish dipanggil setelah strip terunggah dan setelah finalisasi (GIF); sesi ditandai tersinkron hanya kalau semua file terunggah dan publish berhasil.
+- [x] Retry job menyusulkan start, upload, dan publish setelah layanan pulih.
+- [x] Session ID dikirim huruf kecil.
+- [x] Mock gateway: start, publish (halaman galeri + email disimpan di `mock-uploads/_email/`), validasi seperti produksi.
+
+## Comments
+
+- Halaman Hasil tidak lagi punya catatan "GIF sedang disiapkan": tampilan halaman sepenuhnya milik layanan.
+- Mock diuji dengan skrip Bagian 7 referensi (output sama) dan semua kode error di tabel Bagian 6.
+- Belum diuji ke layanan produksi: menunggu token asli dan R2 aktif dari owner.
