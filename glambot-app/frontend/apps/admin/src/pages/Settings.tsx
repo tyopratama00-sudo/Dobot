@@ -68,6 +68,7 @@ export function Settings() {
       />
       <EmailSection />
       <RegistrationSection />
+      <KeyboardSection />
       <Section
         title="Robot"
         hint="Langsung dikirim ke service dobot (tanpa restart). Turunkan kecepatan kalau gerak robot terlalu kasar."
@@ -176,6 +177,40 @@ function RegistrationSection() {
         Tampilkan layar registrasi di booth
       </label>
       {!on && email?.configured === false ? <p className="small">Atur email booth di bagian Email terlebih dulu.</p> : null}
+    </div>
+  );
+}
+
+function KeyboardSection() {
+  const [settings, reload, err] = usePoll<{ onScreenKeyboard?: boolean }>(() => get('/api/admin/settings'));
+  const [saving, setSaving] = useState(false);
+  const on = settings?.onScreenKeyboard !== false;
+
+  const toggle = async (enabled: boolean) => {
+    setSaving(true);
+    try {
+      await patch('/api/admin/settings', { onScreenKeyboard: enabled });
+      toast(enabled ? 'Keyboard di Layar aktif' : 'Keyboard di Layar dimatikan: booth memakai keyboard hardware');
+      await reload();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2>Keyboard di Layar</h2>
+      <p className="mu small">
+        Keyboard sentuh untuk registrasi, Ubah email, dan kode voucher. Matikan kalau booth memakai keyboard hardware: keyboard di layar disembunyikan
+        dan pelanggan mengetik dengan keyboard fisik. Saat aktif, keyboard hardware diabaikan. Langsung berlaku di booth.
+      </p>
+      {err ? <div className="chip err">{err}</div> : null}
+      <label className="f" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <input type="checkbox" checked={on} disabled={!settings || saving} onChange={(e) => void toggle(e.target.checked)} />
+        Tampilkan keyboard di layar booth
+      </label>
     </div>
   );
 }

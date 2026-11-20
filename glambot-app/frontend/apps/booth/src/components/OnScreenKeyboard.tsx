@@ -1,4 +1,19 @@
-import { KEYBOARD_ROWS } from '../keyboard';
+import { KEYBOARD_ROWS, SHORTCUTS } from '../keyboard';
+
+/** Keyboard di Layar off: only the email shortcut keys stay on screen, tapped like the on-screen ones. */
+export function EmailShortcuts({ onKey, disabled }: { onKey: (key: string) => void; disabled?: boolean }) {
+  return (
+    <div className="osk osk-shortcuts" role="group" aria-label="Pintasan email" data-avoid>
+      <div className="osk-row">
+        {SHORTCUTS.map((k) => (
+          <button key={k} type="button" className="osk-key osk-shortcut" disabled={disabled} onClick={() => onKey(k)}>
+            {k}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const LABEL: Record<string, string> = { shift: '⇧ Shift', space: 'Spasi', backspace: '⌫' };
 

@@ -1992,6 +1992,36 @@ img {
 .reg-field span.ph {
   color: rgba(43, 42, 76, 0.3);
 }
+/* Keyboard di Layar off: no on-screen keyboard, so the fields stack larger in the middle. */
+.reg-screen.reg-hw {
+  justify-content: center;
+  gap: 24px;
+}
+.reg-hw .reg-fields {
+  grid-template-columns: 1fr;
+  width: min(100%, 1100px);
+  gap: 18px;
+}
+.reg-hw .reg-field {
+  padding: 18px 32px;
+}
+.reg-hw .reg-field small {
+  font-size: 26px;
+}
+.reg-hw .reg-field span {
+  min-height: 64px;
+  font-size: 52px;
+}
+.reg-hw .reg-caret {
+  height: 52px;
+}
+.reg-hw .reg-next {
+  justify-content: center;
+  min-height: 96px;
+}
+.osk-shortcuts {
+  width: min(100%, 1100px);
+}
 .reg-caret {
   display: inline-block;
   width: 3px;
