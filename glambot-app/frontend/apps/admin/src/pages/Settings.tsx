@@ -203,8 +203,8 @@ function KeyboardSection() {
     <div className="card">
       <h2>Keyboard di Layar</h2>
       <p className="mu small">
-        Keyboard sentuh untuk registrasi, Ubah email, dan kode voucher. Matikan kalau booth memakai keyboard hardware: keyboard di layar disembunyikan
-        dan pelanggan mengetik dengan keyboard fisik. Saat aktif, keyboard hardware diabaikan. Langsung berlaku di booth.
+        Keyboard sentuh untuk registrasi, Ubah email, dan kode voucher. Matikan kalau booth memakai keyboard hardware: Keyboard di Layar disembunyikan
+        dan pelanggan mengetik dengan keyboard hardware. Saat aktif, keyboard hardware diabaikan. Langsung berlaku di booth.
       </p>
       {err ? <div className="chip err">{err}</div> : null}
       <label className="f" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>

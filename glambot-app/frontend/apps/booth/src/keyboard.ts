@@ -1,6 +1,7 @@
 /**
  * On-screen keyboard logic (no DOM): the layout and what each key does to the text.
- * Used by components/OnScreenKeyboard for the registration screen and the QR "Ubah email" dialog.
+ * Used by components/OnScreenKeyboard for the registration screen and the QR "Ubah email" dialog,
+ * and by hardwareKey for the same fields when Keyboard di Layar is off.
  */
 
 export const SHORTCUTS = ['@gmail.com', '@yahoo.com', '.com'] as const;

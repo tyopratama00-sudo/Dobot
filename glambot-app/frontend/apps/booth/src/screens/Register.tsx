@@ -74,7 +74,7 @@ export function Registration() {
     if (a.type === 'edit') {
       setValues((v) => ({ ...v, [field]: a.state.value }));
       setShift(field === 'name' && e.key === ' ' ? true : a.state.shift);
-    } else if (a.type === 'next' || a.type === 'prev') select(FIELDS[(at + (a.type === 'next' ? 1 : FIELDS.length - 1)) % FIELDS.length]);
+    } else if (a.type === 'next' || a.type === 'prev') select(FIELDS[Math.min(FIELDS.length - 1, Math.max(0, at + (a.type === 'next' ? 1 : -1)))]);
     else if (field !== 'whatsapp') select(FIELDS[at + 1]);
     else if (ready) onNext();
     return true;
@@ -98,7 +98,7 @@ export function Registration() {
       </button>
       <div className="reg-head">
         <h1>Kirim foto ke email kamu</h1>
-        <p className="p">{osk ? 'Isi nama dan email, lalu tekan Lanjut.' : 'Ketik pakai keyboard di depanmu. Tab atau Enter untuk pindah kolom, Enter di kolom terakhir untuk Lanjut.'}</p>
+        <p className="p">{osk ? 'Isi nama dan email, lalu tekan Lanjut.' : 'Ketik pakai keyboard di depanmu.'}</p>
       </div>
       <div className="reg-fields">
         {box('name', 'Nama', 'Nama kamu')}

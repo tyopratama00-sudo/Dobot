@@ -257,7 +257,7 @@ export function Pay() {
             <div className="voucher-panel">
                 <div className="voucher-title" data-avoid>
                   <span className="voucher-icon"><Icon n="ticket" z={34} /></span>
-                  <div><h2>Masukkan voucher</h2><p className="voucher-prompt">{osk ? 'Ketuk kolom, lalu ketik kodenya' : 'Ketik kode voucher, lalu tekan Enter'}</p></div>
+                  <div><h2>Masukkan voucher</h2><p className="voucher-prompt">{osk ? 'Ketuk kolom, lalu ketik kodenya' : 'Ketik kode voucher'}</p></div>
                   {keypadOpen ? <button className="btn sm voucher-keyboard-close" type="button" onClick={() => setVoucherKeyboardOpen(false)}>Tutup</button> : null}
                 </div>
                <div className="voucher-entry">

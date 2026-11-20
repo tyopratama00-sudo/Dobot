@@ -18,7 +18,7 @@ export function EmailShortcuts({ onKey, disabled }: { onKey: (key: string) => vo
 const LABEL: Record<string, string> = { shift: '⇧ Shift', space: 'Spasi', backspace: '⌫' };
 
 /**
- * Reusable on-screen keyboard (kiosk has no physical one). Pure view: the parent keeps the
+ * Reusable on-screen keyboard (Keyboard di Layar on). Pure view: the parent keeps the
  * text and applies each key with keyboard.ts pressKey, so any field can use it.
  */
 export function OnScreenKeyboard({ shift, onKey, disabled, label = 'Keyboard' }: { shift: boolean; onKey: (key: string) => void; disabled?: boolean; label?: string }) {
