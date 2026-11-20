@@ -51,3 +51,13 @@ test('the cheap mode check also reports whether registration is on', async () =>
   vi.stubGlobal('fetch', vi.fn(async () => json({ freeMode: false, freeDigitalOnly: false, registrationEnabled: true })));
   expect(await api.mode()).toMatchObject({ freeMode: false, registrationScreen: true });
 });
+
+test('Keyboard di Layar follows admin and stays on for a backend that does not know it', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ onScreenKeyboard: false })));
+  expect(await api.mode()).toMatchObject({ onScreenKeyboard: false });
+  vi.stubGlobal('fetch', vi.fn(async () => json({})));
+  expect(await api.mode()).toMatchObject({ onScreenKeyboard: true });
+
+  backend({ freeUntilPackageRead: 0 });
+  expect((await api.config()).onScreenKeyboard).toBe(true);
+});

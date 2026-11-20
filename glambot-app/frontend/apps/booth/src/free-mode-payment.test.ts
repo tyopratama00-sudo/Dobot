@@ -165,6 +165,20 @@ test('failed check or a config that fell back to defaults changes nothing', asyn
   expect(get().config).toMatchObject({ freeMode: true, freeDigitalOnly: true });
 });
 
+test('Keyboard di Layar switched off reaches a customer mid-registration or with a QR, without the other modes', async () => {
+  set({ config: { ...paidConfig, onScreenKeyboard: true }, session: snap('REGISTRATION', 1) } as never);
+  api.mode.mockResolvedValue({ freeMode: true, onScreenKeyboard: false });
+  api.config.mockResolvedValue({ ...freeConfig, onScreenKeyboard: false });
+
+  await syncMode();
+  expect(get().config).toMatchObject({ freeMode: false, onScreenKeyboard: false });
+
+  set({ session: snap('WAITING_PAYMENT', 2) } as never);
+  api.mode.mockResolvedValue({ freeMode: true, onScreenKeyboard: true });
+  await syncMode();
+  expect(get().config).toMatchObject({ freeMode: false, onScreenKeyboard: true });
+});
+
 test('registration switched on in admin reaches a booth that is already open', async () => {
   set({ session: null } as never);
   api.mode.mockResolvedValue({ freeMode: true, registrationScreen: true });

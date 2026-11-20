@@ -25,6 +25,8 @@ const (
 	keyFreeDigitalOnly = "free_mode_digital_only"
 	// Registrasi pelanggan (default mati). Hanya bisa dinyalakan saat email booth diatur.
 	keyRegistrationEnabled = "registration_enabled"
+	// Keyboard di Layar (default aktif). Mati = booth memakai keyboard hardware.
+	keyOnScreenKeyboard = "on_screen_keyboard"
 )
 
 type timerField struct {
@@ -78,13 +80,14 @@ type timerConfig struct {
 	// Admin: nilai tersimpan. Publik (GET /api/config): true hanya bila email
 	// booth juga diatur, supaya pelanggan tidak mengisi email yang tak terkirim.
 	RegistrationEnabled bool `json:"registrationEnabled"`
+	OnScreenKeyboard    bool `json:"onScreenKeyboard"`
 }
 
 // loadTimerConfig membaca timer dari app_settings, mengisi default untuk key
 // yang belum ada / nilainya tidak valid.
 func loadTimerConfig() (timerConfig, error) {
-	cfg := timerConfig{Timeouts: map[string]int{}, Session: map[string]int{}, Display: map[string]string{}, VoucherChipEnabled: true, VoucherChipCode: defaultChipCode}
-	keys := []string{keyVoucherChip, keyVoucherChipCode, keyFreeModeBackup, keyFreeDigitalOnly, keyRegistrationEnabled}
+	cfg := timerConfig{Timeouts: map[string]int{}, Session: map[string]int{}, Display: map[string]string{}, VoucherChipEnabled: true, VoucherChipCode: defaultChipCode, OnScreenKeyboard: true}
+	keys := []string{keyVoucherChip, keyVoucherChipCode, keyFreeModeBackup, keyFreeDigitalOnly, keyRegistrationEnabled, keyOnScreenKeyboard}
 	for _, f := range timerFields {
 		cfg.Timeouts[f.JSON] = f.Def
 		keys = append(keys, f.Key)
@@ -111,6 +114,7 @@ func loadTimerConfig() (timerConfig, error) {
 	_, cfg.FreeMode = values[keyFreeModeBackup]
 	cfg.FreeDigitalOnly = values[keyFreeDigitalOnly] == "1"
 	cfg.RegistrationEnabled = values[keyRegistrationEnabled] == "1"
+	cfg.OnScreenKeyboard = values[keyOnScreenKeyboard] != "0"
 	for _, f := range timerFields {
 		if n, err := strconv.Atoi(values[f.Key]); err == nil && n >= f.Min && n <= f.Max {
 			cfg.Timeouts[f.JSON] = n
@@ -258,12 +262,13 @@ func AdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		VoucherChipCode     *string           `json:"voucherChipCode"`
 		FreeDigitalOnly     *bool             `json:"freeDigitalOnly"`
 		RegistrationEnabled *bool             `json:"registrationEnabled"`
+		OnScreenKeyboard    *bool             `json:"onScreenKeyboard"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "Body tidak valid")
 		return
 	}
-	if len(body.Timeouts) == 0 && len(body.Session) == 0 && len(body.Display) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil && body.RegistrationEnabled == nil {
+	if len(body.Timeouts) == 0 && len(body.Session) == 0 && len(body.Display) == 0 && body.VoucherChipEnabled == nil && body.VoucherChipCode == nil && body.FreeDigitalOnly == nil && body.RegistrationEnabled == nil && body.OnScreenKeyboard == nil {
 		respondError(w, http.StatusBadRequest, "Tidak ada perubahan")
 		return
 	}
@@ -324,6 +329,9 @@ func AdminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		strUpdates[keyRegistrationEnabled] = strconv.Itoa(boolToInt(*body.RegistrationEnabled))
+	}
+	if body.OnScreenKeyboard != nil {
+		strUpdates[keyOnScreenKeyboard] = strconv.Itoa(boolToInt(*body.OnScreenKeyboard))
 	}
 	if err := upsertAppSettings(strUpdates); err != nil {
 		respondInternal(w, "update app_settings", err)

@@ -16,6 +16,10 @@ _Avoid_: Akun, pendaftaran akun, sign up, data member
 Alamat pengganti yang ditawarkan booth saat domain email di registrasi kemungkinan salah ketik dari domain umum (misalnya `gmial.com` → `gmail.com`). Hanya tawaran: pelanggan boleh memakainya, memperbaiki sendiri, atau tetap memakai alamat yang diketik.
 _Avoid_: Koreksi otomatis, validasi email
 
+**Keyboard di Layar**:
+Keyboard sentuh yang digambar booth untuk mengetik registrasi, Ubah email, dan kode voucher. Toggle admin: saat nonaktif, Keyboard di Layar disembunyikan dan pelanggan mengetik dengan keyboard hardware; saat aktif, keyboard hardware diabaikan. Layar sentuh tetap dipakai untuk semua tombol di kedua mode.
+_Avoid_: Mode tanpa touchscreen, versi UI kedua, virtual keyboard
+
 **Email Foto**:
 Email yang dikirim ke alamat di registrasi setelah foto sesi siap, berisi link Halaman Hasil dan strip foto final. Dikirim ke setiap registrasi, sudah atau belum scan QR.
 _Avoid_: Notifikasi, newsletter, email promo

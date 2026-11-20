@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { priceFor, rp } from '@photobooth/shared';
 import { scaleMs, useBooth } from '../store';
 import { Bubble, Icon, QrCode, Steps } from '../components/basics';
+import { useHardwareKeys, useOnScreenKeyboard } from '../components/useHardwareKeys';
+import { hardwareKey } from '../keyboard';
 import { announcePaymentMethods, announceVoucherEntry, applyFreeVoucher, backFromPay, PAID_HOLD_MS, retryPayment, selectQrPayment, setDigital, setQty } from '../flow';
 
 type PayStage = 'select' | 'payment';
@@ -77,7 +79,7 @@ export function Pay() {
   const [voucherUsed, setVoucherUsed] = useState(false);
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [method, setMethod] = useState<'choose' | 'qris' | 'voucher'>('choose');
-  // On-screen keypad: kiosk has no physical keyboard; typing clears the last error.
+  // On-screen keypad (or the hardware keyboard when Keyboard di Layar is off); typing clears the last error.
   const typeVoucher = (f: (c: string) => string) => {
     setVoucherCode((c) => f(c).slice(0, 20));
     setVoucherError(null);
@@ -107,13 +109,36 @@ export function Pay() {
       setStage('select');
     } else backFromPay();
   };
+  const applyVoucher = () =>
+    void applyFreeVoucher(voucherCode).then((error) => {
+      setVoucherError(error);
+      if (!error) {
+        setVoucherUsed(true);
+        setVoucherKeyboardOpen(false);
+        setMethod('qris');
+      }
+    });
+  const canApplyVoucher = !voucherUsed && !!voucherCode.trim() && !busy;
+  // Keyboard di Layar off: the code is typed straight away on the hardware keyboard, Enter = Pakai.
+  const osk = useOnScreenKeyboard();
+  const keypadOpen = osk && voucherKeyboardOpen;
+  useHardwareKeys(!osk && stage === 'payment' && method === 'voucher' && pay !== 'ok' && !voucherUsed, (e) => {
+    const a = hardwareKey({ value: voucherCode, shift: false }, e, 20);
+    if (!a || a.type === 'cancel') return false;
+    if (a.type === 'edit') {
+      const code = a.state.value.toUpperCase();
+      // Same keys as the voucher keypad: letters, digits and space.
+      if (/^[A-Z0-9 ]*$/.test(code)) typeVoucher(() => code);
+    } else if (a.type === 'submit' && canApplyVoucher) applyVoucher();
+    return true;
+  });
   // Only success forces the payment stage; a re-requested QR (qty change) must not skip "Lanjut".
   useEffect(() => {
     if (pay === 'ok') setStage('payment');
   }, [pay]);
 
   return (
-    <div className={`scr en booth-theme pay-screen ${method === 'voucher' && voucherKeyboardOpen ? 'voucher-open' : ''}`}>
+    <div className={`scr en booth-theme pay-screen ${method === 'voucher' && keypadOpen ? 'voucher-open' : ''}`}>
       <i className="pay-blob a" aria-hidden />
       <i className="pay-blob b" aria-hidden />
       <div className="top">
@@ -232,23 +257,23 @@ export function Pay() {
             <div className="voucher-panel">
                 <div className="voucher-title" data-avoid>
                   <span className="voucher-icon"><Icon n="ticket" z={34} /></span>
-                  <div><h2>Masukkan voucher</h2><p className="voucher-prompt">Ketuk kolom, lalu ketik kodenya</p></div>
-                  {voucherKeyboardOpen ? <button className="btn sm voucher-keyboard-close" type="button" onClick={() => setVoucherKeyboardOpen(false)}>Tutup</button> : null}
+                  <div><h2>Masukkan voucher</h2><p className="voucher-prompt">{osk ? 'Ketuk kolom, lalu ketik kodenya' : 'Ketik kode voucher'}</p></div>
+                  {keypadOpen ? <button className="btn sm voucher-keyboard-close" type="button" onClick={() => setVoucherKeyboardOpen(false)}>Tutup</button> : null}
                 </div>
                <div className="voucher-entry">
-               <input className="voucher-input" aria-label="Kode voucher" value={voucherCode} readOnly inputMode="none" placeholder="Kode voucher" disabled={voucherUsed} onClick={() => setVoucherKeyboardOpen(true)} aria-haspopup="true" aria-expanded={voucherKeyboardOpen} data-avoid />
-                <button className={`btn pr voucher-submit ${busy === 'voucher' ? 'wait' : ''}`} onClick={() => void applyFreeVoucher(voucherCode).then((error) => { setVoucherError(error); if (!error) { setVoucherUsed(true); setVoucherKeyboardOpen(false); setMethod('qris'); } })} disabled={voucherUsed || !voucherCode.trim() || !!busy} data-avoid>
+               <input className="voucher-input" aria-label="Kode voucher" value={voucherCode} readOnly inputMode="none" placeholder="Kode voucher" disabled={voucherUsed} onClick={() => osk && setVoucherKeyboardOpen(true)} aria-haspopup={osk} aria-expanded={osk ? keypadOpen : undefined} data-avoid />
+                <button className={`btn pr voucher-submit ${busy === 'voucher' ? 'wait' : ''}`} onClick={applyVoucher} disabled={!canApplyVoucher} data-avoid>
                  <Icon n={voucherUsed ? 'check' : 'ticket'} z={23} />{voucherUsed ? 'Berhasil' : 'Pakai'}
                </button>
                </div>
-                {voucherChip && !voucherKeyboardOpen ? (
+                {voucherChip && !keypadOpen ? (
                 <button className="voucher-chip" type="button" onClick={() => { setVoucherCode(voucherChipCode); setVoucherError(null); }} disabled={voucherUsed}>
                   <Icon n="ticket" z={25} /><span><b>{voucherChipCode}</b><small>Ketuk untuk pakai</small></span><Icon n="next" z={23} />
                 </button>
                ) : null}
                {voucherError ? <div className="pill f voucher-error" role="alert"><Icon n="x" z={22} />{voucherError}</div> : null}
             </div>
-            {voucherKeyboardOpen ? <div className="voucher-keys" role="group" aria-label="Keyboard voucher" data-avoid>
+            {keypadOpen ? <div className="voucher-keys" role="group" aria-label="Keyboard voucher" data-avoid>
               {[...KEYS].map((k) => (
                 <button key={k} type="button" onClick={() => typeVoucher((c) => c + k)} disabled={voucherUsed}>{k}</button>
               ))}

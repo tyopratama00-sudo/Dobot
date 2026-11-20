@@ -342,15 +342,22 @@ let payTimer: ReturnType<typeof setTimeout> | undefined;
 let paymentRequests = 0;
 let modeSyncing = false;
 
-const mayPickUpMode = () => canSwitchMode(get().session?.status, paymentRequests > 0 || !!get().busy);
+const requestInFlight = () => paymentRequests > 0 || !!get().busy;
+const mayPickUpMode = () => canSwitchMode(get().session?.status, requestInFlight());
 
-/** Apply a mode switch from admin as soon as the customer is somewhere it is safe to do so. */
+/**
+ * Apply a mode switch from admin as soon as the customer is somewhere it is safe to do so.
+ * Keyboard di Layar only changes how text is typed, so it applies on any screen.
+ */
 export async function syncMode() {
-  if (modeSyncing || !mayPickUpMode()) return;
+  if (modeSyncing || requestInFlight()) return;
   modeSyncing = true;
   try {
     const mode = await api.mode();
-    if (!modeChanged(get().config, mode) || !mayPickUpMode()) return;
+    const onScreenKeyboard = mode.onScreenKeyboard !== false;
+    const current = get().config;
+    if (current && (current.onScreenKeyboard !== false) !== onScreenKeyboard) set({ config: { ...current, onScreenKeyboard } });
+    if (!mayPickUpMode() || !modeChanged(get().config, mode)) return;
     const config = await api.config();
     // config() falls back to paid defaults if /api/config fails: never switch on that.
     if (modeChanged(config, mode) || !mayPickUpMode()) return;

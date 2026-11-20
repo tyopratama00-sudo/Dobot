@@ -149,6 +149,8 @@ interface AppConfig {
   freeDigitalOnly?: boolean;
   /** Already false when the booth email is not configured. */
   registrationEnabled?: boolean;
+  /** Keyboard di Layar; missing (older backend) = on. */
+  onScreenKeyboard?: boolean;
   timeouts?: Partial<BoothConfig['timeouts']>;
   session?: { readySeconds?: number; retakeLimit?: number; maxQuantity?: number };
   display?: { brandLabel?: string; welcomeChip?: string };
@@ -318,14 +320,15 @@ class Api {
       voucherChipCode: appConfig.voucherChipCode || 'FREE FOTO',
       freeDigitalOnly: appConfig.freeDigitalOnly === true,
       registrationScreen: this.registrationScreen,
+      onScreenKeyboard: appConfig.onScreenKeyboard !== false,
       environment: 'production',
     };
   }
 
   /** Just the admin switches the booth must follow live: cheap enough to poll, unlike config(). */
-  async mode(): Promise<{ freeMode: boolean; freeDigitalOnly: boolean; registrationScreen: boolean }> {
+  async mode(): Promise<{ freeMode: boolean; freeDigitalOnly: boolean; registrationScreen: boolean; onScreenKeyboard: boolean }> {
     const c = await go<AppConfig>('GET', '/api/config');
-    return { freeMode: c.freeMode === true, freeDigitalOnly: c.freeDigitalOnly === true, registrationScreen: c.registrationEnabled === true };
+    return { freeMode: c.freeMode === true, freeDigitalOnly: c.freeDigitalOnly === true, registrationScreen: c.registrationEnabled === true, onScreenKeyboard: c.onScreenKeyboard !== false };
   }
 
   async health() {

@@ -3,8 +3,9 @@ import { REGISTRATION_LIMITS } from '@photobooth/shared';
 import { useBooth } from '../store';
 import { openEmailChange, saveEmailChange } from '../flow';
 import { isValidEmail, suggestEmail } from '../email';
-import { pressKey } from '../keyboard';
-import { OnScreenKeyboard } from './OnScreenKeyboard';
+import { hardwareKey, pressKey } from '../keyboard';
+import { EmailShortcuts, OnScreenKeyboard } from './OnScreenKeyboard';
+import { useHardwareKeys, useOnScreenKeyboard } from './useHardwareKeys';
 import { Icon } from './basics';
 
 const MAX_EMAIL = REGISTRATION_LIMITS.email;
@@ -56,6 +57,23 @@ function EmailChangeDialog({ current, onClose }: { current: string; onClose: () 
   const save = async () => {
     if (await saveEmailChange(email)) onClose();
   };
+  const canSave = valid && email !== current && !busy;
+  const osk = useOnScreenKeyboard();
+  // Hardware keyboard: Enter = Simpan, Esc = Batal.
+  useHardwareKeys(!osk, (e) => {
+    const a = hardwareKey({ value, shift }, e, MAX_EMAIL);
+    if (!a) return false;
+    if (a.type === 'edit') {
+      if (busy === 'email') return true;
+      setValue(a.state.value);
+      setShift(a.state.shift);
+    } else if (a.type === 'submit') {
+      if (canSave) void save();
+    } else if (a.type === 'cancel') {
+      if (busy !== 'email') onClose();
+    }
+    return true;
+  });
   return (
     <div className="qr-email-dialog" role="dialog" aria-label="Ubah email" data-testid="qr-email-dialog">
       <div className="qr-email-panel">
@@ -74,7 +92,7 @@ function EmailChangeDialog({ current, onClose }: { current: string; onClose: () 
           <button
             type="button"
             className={`btn pr reg-next ${busy === 'email' ? 'wait' : ''}`}
-            disabled={!valid || email === current || !!busy}
+            disabled={!canSave}
             onClick={() => void save()}
             data-testid="qr-email-save"
             data-avoid
@@ -96,7 +114,7 @@ function EmailChangeDialog({ current, onClose }: { current: string; onClose: () 
             <p className="reg-bad">Format email belum benar. Contoh: nama@gmail.com</p>
           ) : null}
         </div>
-        <OnScreenKeyboard shift={shift} onKey={onKey} disabled={busy === 'email'} label="Keyboard email" />
+        {osk ? <OnScreenKeyboard shift={shift} onKey={onKey} disabled={busy === 'email'} label="Keyboard email" /> : <EmailShortcuts onKey={onKey} disabled={busy === 'email'} />}
       </div>
     </div>
   );

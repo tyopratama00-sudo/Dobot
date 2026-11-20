@@ -33,6 +33,8 @@ export function devMode(): boolean {
   return new URLSearchParams(location.search).has('dev');
 }
 
+const pressable = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('button,[role="button"],[role="radio"],input[type="checkbox"],input[readonly]');
+
 export function installKioskGuards() {
   const prevent = (e: Event) => e.preventDefault();
   const allowDev = devMode();
@@ -57,6 +59,12 @@ export function installKioskGuards() {
     if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0', 'r', 'p', 's', 'o', 'u', 'f'].includes(k)) e.preventDefault();
     if (!allowDev && (k === 'f5' || k === 'f12' || (e.altKey && (k === 'arrowleft' || k === 'arrowright')))) e.preventDefault();
     if (k === 'backspace' && !(e.target as HTMLElement)?.closest?.('input,textarea')) e.preventDefault();
+    // A tapped button keeps focus: a hardware Enter/Space must not press it again. Screens that
+    // take hardware keys (Keyboard di Layar off) still receive the event via useHardwareKeys.
+    if ((k === 'enter' || k === ' ') && pressable(e.target)) e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === ' ' && pressable(e.target)) e.preventDefault();
   });
   // Swallow browser "back" (touchpad swipe / mouse button)
   history.pushState(null, '', location.href);

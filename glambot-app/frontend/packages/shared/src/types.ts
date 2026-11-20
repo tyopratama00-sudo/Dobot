@@ -131,6 +131,8 @@ export interface BoothConfig {
   freeMode?: boolean;
   /** Show the Registrasi screen before the package: admin switch on and booth email configured. */
   registrationScreen?: boolean;
+  /** Keyboard di Layar. Off: the booth has a hardware keyboard and hides the on-screen one. Missing = on. */
+  onScreenKeyboard?: boolean;
   environment: string;
 }
 
